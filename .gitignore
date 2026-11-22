@@ -1,0 +1,12 @@
+circuits/target/
+# Prover.toml holds the private witness.
+Prover.toml
+*.db
+*.db-journal
+/bin/
+
+# Mock CA / holder keys and certificates, and the Noir fixtures derived from
+# them. Generated locally by `make fixtures`; never commit them: anyone holding
+# a published mock CA key could forge certificates for a verifier that trusts it.
+/testdata/
+/circuits/src/fixtures.nr
