@@ -11,7 +11,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
-	"shoji/internal/witness"
+	"github.com/keitaj/shoji/internal/witness"
 )
 
 // VerifierTarget selects bb's transcript hash and zero-knowledge setting. Prover

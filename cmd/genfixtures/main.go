@@ -17,9 +17,9 @@ import (
 	"path/filepath"
 	"strings"
 
-	"shoji/internal/mockjpki"
-	"shoji/internal/proto"
-	"shoji/internal/witness"
+	"github.com/keitaj/shoji/internal/mockjpki"
+	"github.com/keitaj/shoji/internal/proto"
+	"github.com/keitaj/shoji/internal/witness"
 )
 
 type holderSpec struct {

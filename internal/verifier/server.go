@@ -22,8 +22,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"shoji/internal/proto"
-	"shoji/internal/prover"
+	"github.com/keitaj/shoji/internal/proto"
+	"github.com/keitaj/shoji/internal/prover"
 )
 
 const (

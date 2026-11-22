@@ -10,11 +10,11 @@ import (
 	"testing"
 	"time"
 
-	"shoji/internal/client"
-	"shoji/internal/mockjpki"
-	"shoji/internal/proto"
-	"shoji/internal/prover"
-	"shoji/internal/verifier"
+	"github.com/keitaj/shoji/internal/client"
+	"github.com/keitaj/shoji/internal/mockjpki"
+	"github.com/keitaj/shoji/internal/proto"
+	"github.com/keitaj/shoji/internal/prover"
+	"github.com/keitaj/shoji/internal/verifier"
 )
 
 const app = "test-app"

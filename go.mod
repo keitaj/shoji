@@ -1,4 +1,4 @@
-module shoji
+module github.com/keitaj/shoji
 
 go 1.27.4
 

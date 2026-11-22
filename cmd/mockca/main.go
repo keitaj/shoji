@@ -13,8 +13,8 @@ import (
 	"log"
 	"os"
 
-	"shoji/internal/mockjpki"
-	"shoji/internal/proto"
+	"github.com/keitaj/shoji/internal/mockjpki"
+	"github.com/keitaj/shoji/internal/proto"
 )
 
 func main() {

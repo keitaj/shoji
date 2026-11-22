@@ -7,10 +7,10 @@ import (
 	"os"
 	"testing"
 
-	"shoji/internal/mockjpki"
-	"shoji/internal/proto"
-	"shoji/internal/prover"
-	"shoji/internal/witness"
+	"github.com/keitaj/shoji/internal/mockjpki"
+	"github.com/keitaj/shoji/internal/proto"
+	"github.com/keitaj/shoji/internal/prover"
+	"github.com/keitaj/shoji/internal/witness"
 )
 
 func TestProveAdult(t *testing.T) {

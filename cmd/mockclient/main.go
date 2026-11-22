@@ -11,9 +11,9 @@ import (
 	"net/http"
 	"time"
 
-	"shoji/internal/client"
-	"shoji/internal/mockjpki"
-	"shoji/internal/prover"
+	"github.com/keitaj/shoji/internal/client"
+	"github.com/keitaj/shoji/internal/mockjpki"
+	"github.com/keitaj/shoji/internal/prover"
 )
 
 func main() {

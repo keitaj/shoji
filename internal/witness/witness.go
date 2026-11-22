@@ -13,7 +13,7 @@ import (
 	"math/big"
 	"strings"
 
-	"shoji/internal/proto"
+	"github.com/keitaj/shoji/internal/proto"
 )
 
 // Inputs mirrors the parameters of main() in circuits/src/main.nr.
