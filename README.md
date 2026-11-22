@@ -1,5 +1,11 @@
 # shoji
 
+[![CI](https://github.com/keitaj/shoji/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/keitaj/shoji/actions/workflows/ci.yml)
+[![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![Go version](https://img.shields.io/github/go-mod/go-version/keitaj/shoji)](go.mod)
+[![Noir 1.0.0](https://img.shields.io/badge/Noir-1.0.0-black)](circuits/Nargo.toml)
+[![Status: proof of concept](https://img.shields.io/badge/status-proof%20of%20concept-orange)](docs/threat-model.md#out-of-scope-and-known-limitations)
+
 **English** | [日本語](README.ja.md)
 
 > Like a *shoji* screen: it shows the outline of a person, but not who they are.
