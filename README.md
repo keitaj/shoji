@@ -18,11 +18,12 @@ personal data ever leaving their device.
 
 > [!WARNING]
 > **Status: proof of concept. Not for production.**
-> Proofs have only been made with certificates from a mock CA. The certificate
-> structure has been checked against one real card, but no proof has been made
-> with a real card yet (see [open questions](docs/open-questions.md)). The
-> circuit and its dependencies are unaudited, and certificate expiry and
-> revocation are not checked.
+> It has been run end to end with one real card: the card signed a challenge, and
+> the proof was accepted by a verifier trusting only the real signing CA. In that
+> run the proof was generated on a PC, not on the phone, so the certificate did
+> leave the device. Day-to-day development uses a mock CA. The circuit and its
+> dependencies are unaudited, and certificate expiry and revocation are not
+> checked (see [open questions](docs/open-questions.md)).
 
 ## What it proves
 
@@ -147,6 +148,7 @@ cmd/genfixtures/    generates testdata/ and the circuit test fixtures
 cmd/certinspect/    prints a certificate's structure without its contents; checks it against the circuit
 cmd/verifier/       verification server (/challenge, /verify, `ban` subcommand)
 cmd/mockclient/     stand-in for the holder: signs with a mock key instead of a card
+cmd/cardclient/     holder for a real card: gets a challenge, then proves with the card's signature
 internal/proto/     values the circuit and Go must agree on (message format, hashes, field encoding)
 internal/mockjpki/  mock certificate issuance
 internal/witness/   circuit inputs (Prover.toml)
@@ -154,7 +156,7 @@ internal/prover/    runs noir-execute and bb prove
 internal/verifier/  server and SQLite store
 internal/client/    holder side of the protocol
 docs/               threat model, open questions, benchmarks
-ios/                development tool that reads the certificates from a real card (iPhone)
+ios/                development tool that reads a real card and has it sign a challenge (iPhone)
 ```
 
 ## Documentation
@@ -169,15 +171,15 @@ documents are authoritative.
 ## Roadmap
 
 Working today: the circuit, a mock CA, the verification server, negative tests
-and PC benchmarks. The certificate structure the circuit expects has been
-checked against one real card.
+and PC benchmarks. With one real card, a full proof has been made and accepted
+(card reading and signing on an iPhone, proving on a PC).
 
 Not implemented yet:
 
-- Having a real card sign the nonce and proving with it. (`ios/` contains a
-  development tool that reads the certificates from a card; it does not sign or
-  prove.)
-- On-device proving.
+- On-device proving. Until then the certificate has to be moved to a PC to make
+  a proof, which is not the intended design. (`ios/` is a development tool that
+  reads the certificates and has the card sign a challenge; it does not prove.)
+- A reader app for end users.
 - Checking certificate expiry.
 
 Revocation checking falls under Japan's accreditation scheme for public personal

@@ -15,6 +15,7 @@ import (
 	"github.com/keitaj/shoji/internal/proto"
 	"github.com/keitaj/shoji/internal/prover"
 	"github.com/keitaj/shoji/internal/verifier"
+	"github.com/keitaj/shoji/internal/witness"
 )
 
 const app = "test-app"
@@ -250,4 +251,38 @@ func TestMalformedAndUnknownApp(t *testing.T) {
 		t.Fatal("challenge for unknown app should fail")
 	}
 	e.expectReject(&verifier.VerifyRequest{Nonce: "zz", CAPubkeyHash: "0x01", Nullifier: "0x01", Proof: "AA=="}, http.StatusBadRequest, "malformed")
+}
+
+// The real-card path: the signature is made outside the client (by a card) and
+// the client holds no private key.
+func TestProofFromExternallyMadeSignature(t *testing.T) {
+	e := newEnv(t)
+	h := e.holder("adult", "ca")
+	key := h.Key
+	h.Key = nil
+
+	sign := func(ch *verifier.ChallengeResponse) []byte {
+		appID, _ := proto.ParseFieldHex(ch.AppID)
+		nonce, _ := proto.ParseFieldHex(ch.Nonce)
+		sig, err := witness.SignNonce(key, appID, nonce)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return sig
+	}
+
+	ch := e.challenge(app)
+	req, err := h.ProveWithSignature(context.Background(), ch, sign(ch))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if status, res, msg := e.submit(req); status != http.StatusOK || !res.OK {
+		t.Fatalf("external signature: %d %s", status, msg)
+	}
+
+	// A signature made for another challenge is refused before any proving.
+	other := e.challenge(app)
+	if _, err := h.ProveWithSignature(context.Background(), other, sign(ch)); err == nil {
+		t.Fatal("a signature for a different nonce must be refused")
+	}
 }

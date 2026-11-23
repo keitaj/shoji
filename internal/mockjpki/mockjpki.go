@@ -220,6 +220,22 @@ func ReadCertPEM(path string) (*x509.Certificate, error) {
 	return x509.ParseCertificate(block.Bytes)
 }
 
+// ReadCert reads a certificate in PEM or DER form.
+func ReadCert(path string) (*x509.Certificate, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	if block, _ := pem.Decode(raw); block != nil {
+		raw = block.Bytes
+	}
+	cert, err := x509.ParseCertificate(raw)
+	if err != nil {
+		return nil, fmt.Errorf("%s: not a certificate", path)
+	}
+	return cert, nil
+}
+
 func ReadKeyPEM(path string) (*rsa.PrivateKey, error) {
 	raw, err := os.ReadFile(path)
 	if err != nil {

@@ -13,6 +13,7 @@ final class FakeCard: CardTransport {
     var selected: [UInt8]?
     var applicationSelected = false
     private(set) var log: [CommandAPDU] = []
+    private(set) var signedData: [Data] = []
 
     var verifyCommandsWithData: Int { log.filter { $0.ins == 0x20 && !$0.data.isEmpty }.count }
 
@@ -43,6 +44,12 @@ final class FakeCard: CardTransport {
             let off = Int(c.p1) << 8 | Int(c.p2)
             guard off <= file.count else { return ResponseAPDU(sw1: 0x6B, sw2: 0x00) }
             return ResponseAPDU(data: file.subdata(in: off..<min(file.count, off + (c.le ?? 0))), sw1: 0x90, sw2: 0x00)
+        case (0x2A, _):
+            // COMPUTE DIGITAL SIGNATURE: only with the key selected and the password verified.
+            guard selected == [0x00, 0x1A], verified else { return ResponseAPDU(sw1: 0x69, sw2: 0x82) }
+            guard c.cla == 0x80, c.p1 == 0x00, c.p2 == 0x80, c.le == 256 else { return ResponseAPDU(sw1: 0x6A, sw2: 0x86) }
+            signedData.append(c.data)
+            return ResponseAPDU(data: Data(repeating: 0x5A, count: 256), sw1: 0x90, sw2: 0x00)
         default:
             return ResponseAPDU(sw1: 0x6D, sw2: 0x00)
         }
@@ -139,6 +146,43 @@ struct JPKICardTests {
             }
             #expect(card.log.count == before, "nothing may be sent for a malformed password")
         }
+    }
+
+    @Test func testSignsOnlyTheChallengeMessage() async throws {
+        let card = makeCard()
+        let jpki = JPKICard(transport: card)
+        try await jpki.selectApplication()
+        let challenge = try Challenge(testChallenge)
+        let signature = try await jpki.sign(challenge, password: "ABC123")
+        #expect(signature.count == 256)
+        #expect(card.signedData == [challenge.digestInfo])
+        #expect(card.verifyCommandsWithData == 1)
+    }
+
+    @Test func testDoesNotSignWithWrongPasswordOrFewAttempts() async throws {
+        let challenge = try Challenge(testChallenge)
+
+        let wrong = makeCard()
+        try await JPKICard(transport: wrong).selectApplication()
+        do {
+            _ = try await JPKICard(transport: wrong).sign(challenge, password: "WRONG99")
+            Issue.record("expected an error")
+        } catch let e as CardError {
+            #expect(e == .wrongPassword(remaining: 4))
+        }
+        #expect(wrong.signedData.isEmpty)
+
+        let low = makeCard()
+        low.attemptsLeft = 2
+        try await JPKICard(transport: low).selectApplication()
+        do {
+            _ = try await JPKICard(transport: low).sign(challenge, password: "ABC123")
+            Issue.record("expected an error")
+        } catch let e as CardError {
+            #expect(e == .tooFewAttemptsLeft(remaining: 2))
+        }
+        #expect(low.signedData.isEmpty)
+        #expect(low.verifyCommandsWithData == 0)
     }
 
     @Test func testRejectsFileThatIsNotACertificate() async throws {

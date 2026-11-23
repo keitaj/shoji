@@ -27,6 +27,7 @@ enum JPKIFile {
     static let signCertificate: [UInt8] = [0x00, 0x01]
     static let signCACertificate: [UInt8] = [0x00, 0x02]
     static let signPassword: [UInt8] = [0x00, 0x1B]
+    static let signKey: [UInt8] = [0x00, 0x1A]
 }
 
 public struct JPKICard<Transport: CardTransport> {
@@ -89,6 +90,33 @@ public struct JPKICard<Transport: CardTransport> {
     /// Sends the password at most once, and only if at least
     /// `minimumAttemptsToTry` attempts remain.
     public func readSignCertificate(password: String) async throws -> Data {
+        try await verifySignPassword(password)
+        try await selectFile(JPKIFile.signCertificate, "SELECT sign certificate")
+        return try await readCertificate("READ sign certificate")
+    }
+
+    /// Has the card sign shoji's nonce message for `challenge` with the signing key
+    /// and returns the 256-byte RSA signature (SHA-256, PKCS#1 v1.5).
+    ///
+    /// The password rules are the same as for `readSignCertificate`. Only a
+    /// `Challenge` can be signed, never an arbitrary digest.
+    public func sign(_ challenge: Challenge, password: String) async throws -> Data {
+        try await verifySignPassword(password)
+        try await selectFile(JPKIFile.signKey, "SELECT sign key")
+        // COMPUTE DIGITAL SIGNATURE as implemented by jpki/myna: CLA 80, P1/P2 00 80,
+        // data = DigestInfo, Le = 00.
+        let res = try await transport.transmit(
+            CommandAPDU(cla: 0x80, ins: 0x2A, p1: 0x00, p2: 0x80, data: challenge.digestInfo, le: 256))
+        guard res.isOK else { throw CardError.status(step: "SIGN", sw: res.sw) }
+        guard res.data.count == 256 else {
+            throw CardError.unexpectedData("SIGN: signature is not 256 bytes")
+        }
+        return res.data
+    }
+
+    /// Verifies the signing password: at most one attempt, and none at all unless
+    /// at least `minimumAttemptsToTry` attempts remain.
+    private func verifySignPassword(_ password: String) async throws {
         let pin = try Self.normalizedPassword(password)
 
         let remaining = try await signPasswordAttemptsLeft()
@@ -104,9 +132,6 @@ public struct JPKICard<Transport: CardTransport> {
         guard res.isOK else {
             throw CardError.status(step: "VERIFY sign password", sw: res.sw)
         }
-
-        try await selectFile(JPKIFile.signCertificate, "SELECT sign certificate")
-        return try await readCertificate("READ sign certificate")
     }
 
     // MARK: - Helpers

@@ -100,6 +100,19 @@ func NonceMessage(appID, nonce *big.Int) []byte {
 	return msg
 }
 
+// ChallengePrefix starts the text form of a challenge handed to the device
+// that talks to the card.
+const ChallengePrefix = "shoji1"
+
+// ChallengeString is the text form of a challenge: "shoji1:<app_id>:<nonce>",
+// both as 64 hex digits. The card-side software rebuilds NonceMessage from it,
+// so the card only ever signs messages in shoji's own format, never a digest
+// supplied from outside.
+func ChallengeString(appID, nonce *big.Int) string {
+	a, n := FieldBytes(appID), FieldBytes(nonce)
+	return fmt.Sprintf("%s:%x:%x", ChallengePrefix, a[:], n[:])
+}
+
 // PubkeyHash is Poseidon over the 256-byte big-endian modulus split into nine
 // big-endian chunks (eight of 31 bytes, then one of 8 bytes). The public
 // exponent is not hashed because the circuit only accepts 65537.

@@ -32,8 +32,7 @@ other but are **not official**:
 - Files: signing certificate `00 01` (readable only after the signing PIN is verified), signing CA
   certificate `00 02`, signing key `00 1A`, signing PIN `00 1B`.
 - Signing: `80 2A 00 80` with a SHA-256 **DigestInfo** as data; the card applies PKCS#1 v1.5 padding and
-  returns the RSA signature. This matches what the circuit verifies. (The signing command has not been
-  exercised on a real card yet; the select, read and PIN-counter commands have.)
+  returns the RSA signature. This matches what the circuit verifies.
 - The remaining PIN attempts can be read without spending one (status `63 Cx`). myna upper-cases the signing
   password before verifying it.
 
@@ -58,15 +57,14 @@ contents — use the "Certificate structure" issue template).
 | Keys and signature algorithm | holder and CA keys RSA-2048 with e = 65537; sha256WithRSAEncryption | matches |
 | CA hierarchy | the CA certificate on the card is self-signed and directly verifies the holder certificate | matches the single-level assumption |
 
-The circuit's own parser (`parse_tbs`) accepts the real TBSCertificate. A full proof with a real card has not
-been made yet: that needs the card to sign the nonce (next section).
+With that card, a full proof was made and accepted by a verifier that trusts only the card's signing CA
+(2026-11-23; reading and signing on an iPhone with `ios/`, proving on a PC with `cmd/cardclient`).
 
 ## Card signing behaviour (needed for the card reader app)
 
-- The signing command. Open-source implementations pass a SHA-256 DigestInfo and the card applies
-  PKCS#1 v1.5 padding (see above), but this has not been tried on a real card yet.
-- The commands for selecting the application, reading the certificates and reading the PIN retry
-  counter, and PIN verification, worked on a real card as the open-source implementations describe.
+- The commands for selecting the application, reading the certificates, reading the PIN retry counter,
+  verifying the PIN and signing (SHA-256 DigestInfo in, PKCS#1 v1.5 signature out) all worked on a real
+  card as the open-source implementations describe, and the resulting signature verifies in the circuit.
   There is still no official specification to check them against.
 - A signature made with the signing certificate can carry legal effect. Whether
   it is appropriate to have users sign a nonce for identity verification, and

@@ -5,10 +5,13 @@ package client
 import (
 	"bytes"
 	"context"
+	"crypto"
 	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -22,7 +25,7 @@ import (
 // Holder holds what stays on the user's device.
 type Holder struct {
 	Cert  *x509.Certificate
-	Key   *rsa.PrivateKey // mock card
+	Key   *rsa.PrivateKey // mock card; nil when a real card produced the signature
 	CAPub *rsa.PublicKey  // issuer of Cert
 	Tools prover.Tools
 }
@@ -79,6 +82,30 @@ func (h *Holder) Prove(ctx context.Context, ch *verifier.ChallengeResponse) (*ve
 	sig, err := witness.SignNonce(h.Key, appID, nonce)
 	if err != nil {
 		return nil, err
+	}
+	return h.ProveWithSignature(ctx, ch, sig)
+}
+
+// ProveWithSignature builds the request for /verify from a signature over the
+// challenge's nonce message that was made elsewhere (by a real card).
+func (h *Holder) ProveWithSignature(ctx context.Context, ch *verifier.ChallengeResponse, sig []byte) (*verifier.VerifyRequest, error) {
+	nonce, err := proto.ParseFieldHex(ch.Nonce)
+	if err != nil {
+		return nil, err
+	}
+	appID, err := proto.ParseFieldHex(ch.AppID)
+	if err != nil {
+		return nil, err
+	}
+	userPub, ok := h.Cert.PublicKey.(*rsa.PublicKey)
+	if !ok {
+		return nil, errors.New("certificate key is not RSA")
+	}
+	// Check the signature here, where a failure can be explained, rather than
+	// letting witness generation fail without a reason.
+	digest := sha256.Sum256(proto.NonceMessage(appID, nonce))
+	if err := rsa.VerifyPKCS1v15(userPub, crypto.SHA256, digest[:], sig); err != nil {
+		return nil, errors.New("signature does not verify under the certificate's key for this challenge")
 	}
 	in, err := witness.New(h.Cert, h.CAPub, sig, appID, nonce, ch.CurrentDate, ch.AgeThreshold)
 	if err != nil {

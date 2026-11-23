@@ -22,8 +22,8 @@ that the user is "a real person aged 18 or over", together with a "per-applicati
 - Verification server: Go 1.27. For now proofs are verified by calling `bb verify` as a subprocess.
   Storage is SQLite
 - Test certificate generation: Go (crypto/x509)
-- Card reading: `ios/` is a development tool (Swift, CoreNFC) that reads the certificates from a real card.
-  A reader app that signs and proves is not implemented yet
+- Card reading: `ios/` is a development tool (Swift, CoreNFC) that reads the certificates from a real card
+  and has the card sign a challenge. Proving still happens on a PC (`cmd/cardclient`)
 
 The authoritative versions are in README.md, `circuits/Nargo.toml` and `go.mod`.
 
@@ -68,11 +68,12 @@ cmd/genfixtures/    generates testdata/ and the circuit test fixtures (circuits/
 cmd/certinspect/    prints a certificate's structure without its contents; checks it against the circuit
 cmd/verifier/       verification server (nonce issuance, proof verification, nullifier storage, `ban` subcommand)
 cmd/mockclient/     stand-in for the holder (signs with a mock key instead of a card)
+cmd/cardclient/     holder for a real card (gets a challenge, then proves with the card's signature)
 internal/proto/     values the circuit and Go must agree on (message format, hashes, field encoding)
 internal/           the other Go packages (mockjpki, witness, prover, verifier, client)
 testdata/           mock certificates and keys (generated, not in git; never put real personal data here)
 docs/               threat model, open questions, benchmarks (English is authoritative; Japanese in docs/ja/)
-ios/                development tool that reads the certificates from a real card (iPhone)
+ios/                development tool that reads a real card and has it sign a challenge (iPhone)
 ```
 
 ## What is implemented (without a real card)
@@ -114,8 +115,8 @@ card's certificate.
 - A reader app that selects the JPKI AP, reads the signing certificate and, after PIN entry, has the
   card sign the nonce. Confirm APDUs and the file layout from existing open-source implementations and
   official documentation before implementing (do not write them from guesses).
-- Have a real card sign the nonce and make a full proof with it. The certificate structure has been
-  checked against one real card (`ios/` reads the certificates, `cmd/certinspect` reports structure only).
+- A full proof with one real card has been made and accepted (card reading and signing on an iPhone,
+  proving on a PC). What remains is doing the proving on the device.
 - On-device proof generation (time and memory decide whether this is viable as a business).
 - Revocation checking falls under the accreditation scheme for public personal authentication and is
   not handled in the PoC.

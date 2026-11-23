@@ -17,6 +17,9 @@ struct ContentView: View {
     @State private var message = ""
     @State private var busy = false
     @State private var confirmPassword = false
+    @State private var challengeText = ""
+    @State private var signatureHex = ""
+    @State private var confirmSign = false
     @State private var nfc = NFCCardSession()
 
     var body: some View {
@@ -64,6 +67,29 @@ struct ContentView: View {
                     }
                 }
 
+                Section("4. チャレンジに署名する") {
+                    Text("Mac の cardclient challenge が表示した文字列（shoji1:…）を貼り付けます。カードの署名用の鍵で、shoji の本人確認用メッセージ（アプリIDと使い捨ての値）に署名します。それ以外のデータには署名しません。上の暗証番号欄に署名用暗証番号を入力してください。")
+                        .font(.footnote)
+                    TextField("shoji1:…", text: $challengeText, axis: .vertical)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                        .font(.footnote.monospaced())
+                        .lineLimit(3...6)
+                    Button("Mac から受け取ったチャレンジを読み込む") { loadChallengeFile() }
+                    Button("クリップボードから貼り付け") { challengeText = UIPasteboard.general.string ?? "" }
+                    Button("署名する") { confirmSign = true }
+                        .disabled(busy || password.isEmpty || attemptsLeft == nil || (try? Challenge(challengeText)) == nil)
+                    if !challengeText.isEmpty && (try? Challenge(challengeText)) == nil {
+                        Text("チャレンジの形式が正しくありません。").font(.footnote)
+                    }
+                    if !signatureHex.isEmpty {
+                        LabeledContent("署名", value: "\(signatureHex.count / 2) バイト")
+                        Text("署名はアプリの書類フォルダ（signature.txt）にも保存しました。Mac からケーブル経由で取り出せます。")
+                            .font(.footnote)
+                        Button("署名をコピー") { UIPasteboard.general.string = signatureHex }
+                    }
+                }
+
                 if !message.isEmpty {
                     Section("結果") { Text(message) }
                 }
@@ -76,9 +102,22 @@ struct ContentView: View {
                 Button("送る") { run(.signCertificate(password: password)) }
                 Button("やめる", role: .cancel) {}
             }
+            .confirmationDialog(
+                "カードの署名用の鍵で署名します。暗証番号が間違っていると試行回数が1回減ります。",
+                isPresented: $confirmSign, titleVisibility: .visible
+            ) {
+                Button("署名する") {
+                    if let challenge = try? Challenge(challengeText) {
+                        run(.sign(challenge: challenge, password: password))
+                    }
+                }
+                Button("やめる", role: .cancel) {}
+            }
             .onChange(of: scenePhase) { phase in
-                // Nothing personal stays around once the app leaves the foreground.
-                if phase == .background { wipe() }
+                // Nothing personal stays around once the app leaves the foreground. The
+                // challenge and signature files are kept (they hold no personal data and
+                // the Mac may still need to collect the signature) until "erase".
+                if phase == .background { wipe(keepHandOffFiles: true) }
             }
         }
     }
@@ -96,6 +135,12 @@ struct ContentView: View {
                 attemptsLeft = out.attemptsLeft ?? attemptsLeft
                 caCertificate = out.caCertificate ?? caCertificate
                 signCertificate = out.signCertificate ?? signCertificate
+                if let signature = out.signature {
+                    signatureHex = signature.map { String(format: "%02x", $0) }.joined()
+                    challengeText = ""
+                    try? FileManager.default.removeItem(at: Self.challengeFile)
+                    try? Data(signatureHex.utf8).write(to: Self.signatureFile, options: [.atomic, .completeFileProtection])
+                }
                 removeExportedFiles()
                 message = "読み取りました。"
             } catch {
@@ -128,6 +173,24 @@ struct ContentView: View {
         }
     }
 
+    // Hand-off with the developer's Mac over the cable (`xcrun devicectl device copy`):
+    // the Mac puts challenge.txt into the app's Documents folder and collects
+    // signature.txt from it. Neither file contains personal data.
+    private static var documents: URL {
+        FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+    }
+    private static var challengeFile: URL { documents.appendingPathComponent("challenge.txt") }
+    private static var signatureFile: URL { documents.appendingPathComponent("signature.txt") }
+
+    private func loadChallengeFile() {
+        guard let data = try? Data(contentsOf: Self.challengeFile), let text = String(data: data, encoding: .utf8) else {
+            message = "チャレンジのファイルがありません。Mac から送ってください。"
+            return
+        }
+        challengeText = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        message = (try? Challenge(challengeText)) == nil ? "受け取ったチャレンジの形式が正しくありません。" : "チャレンジを読み込みました。"
+    }
+
     private func prepareExport() {
         removeExportedFiles()
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("shoji-probe", isDirectory: true)
@@ -151,10 +214,16 @@ struct ContentView: View {
         exported = []
     }
 
-    private func wipe() {
+    private func wipe(keepHandOffFiles: Bool = false) {
         removeExportedFiles()
         caCertificate = nil
         signCertificate = nil
+        signatureHex = ""
+        challengeText = ""
+        if !keepHandOffFiles {
+            try? FileManager.default.removeItem(at: Self.challengeFile)
+            try? FileManager.default.removeItem(at: Self.signatureFile)
+        }
         password = ""
         message = ""
     }

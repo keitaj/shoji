@@ -32,7 +32,7 @@ func main() {
 	db := flag.String("db", "shoji.db", "SQLite database path")
 	bb := flag.String("bb", def.BB, "path to bb")
 	vk := flag.String("vk", def.VK, "path to the circuit verification key")
-	cas := flag.String("trusted-ca", "", "comma-separated PEM certificates of trusted CAs (required)")
+	cas := flag.String("trusted-ca", "", "comma-separated certificates (PEM or DER) of trusted CAs (required)")
 	apps := flag.String("apps", "demo", "comma-separated application identifiers")
 	age := flag.Uint("age", 18, "age threshold")
 	ttl := flag.Duration("nonce-ttl", 5*time.Minute, "nonce lifetime")
@@ -46,7 +46,7 @@ func main() {
 	}
 	var hashes []string
 	for _, p := range strings.Split(*cas, ",") {
-		cert, err := mockjpki.ReadCertPEM(p)
+		cert, err := mockjpki.ReadCert(p)
 		if err != nil {
 			log.Fatal(err)
 		}

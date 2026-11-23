@@ -2,8 +2,10 @@
 
 A development tool, not a product: it reads the JPKI certificates from a real
 My Number Card so that their **structure** can be compared with the mock
-certificates, using `cmd/certinspect` on your own Mac. It does not generate
-proofs, has no network code, and keeps nothing after it leaves the foreground.
+certificates, using `cmd/certinspect` on your own Mac, and can have the card
+sign a verifier's challenge so that a proof can be generated on the Mac. It does
+not generate proofs itself, has no network code, and keeps nothing after it
+leaves the foreground.
 
 > [!CAUTION]
 > - The signing password (6-16 letters and digits) **locks after 5 consecutive
@@ -58,4 +60,32 @@ Capabilities*, connect the iPhone and run.
    go run ./cmd/certinspect -cert ~/jpki-real/jpki_sign.der -ca ~/jpki-real/jpki_sign_ca.der
    ```
 
-4. Delete the files when done (`rm -P` or just `rm`), and use *erase* in the app.
+4. **Sign a challenge** (to make a full proof with the real card). Start a
+   verifier that trusts the card's CA certificate, get a challenge and copy it
+   into the app over the cable:
+
+   ```sh
+   go run ./cmd/verifier -trusted-ca ~/jpki-real/jpki_sign_ca.der -apps demo -nonce-ttl 30m -db ~/jpki-real/shoji.db
+
+   go run ./cmd/cardclient challenge -state ~/jpki-real/challenge.json > ~/jpki-real/challenge.txt
+   xcrun devicectl device copy to --device <device> \
+       --domain-type appDataContainer --domain-identifier io.github.keitaj.shoji.probe \
+       --source ~/jpki-real/challenge.txt --destination Documents/challenge.txt
+   ```
+
+   In the app: read the retry counter (step 1), enter the signing password, load
+   the challenge, sign. Then collect the signature and prove:
+
+   ```sh
+   xcrun devicectl device copy from --device <device> \
+       --domain-type appDataContainer --domain-identifier io.github.keitaj.shoji.probe \
+       --source Documents/signature.txt --destination ~/jpki-real/signature.txt
+   go run ./cmd/cardclient prove -state ~/jpki-real/challenge.json \
+       -cert ~/jpki-real/jpki_sign.der -ca ~/jpki-real/jpki_sign_ca.der < ~/jpki-real/signature.txt
+   ```
+
+   `xcrun devicectl list devices` shows the device identifier. The app signs only
+   shoji's own nonce message, rebuilt from the challenge; it cannot be made to
+   sign an arbitrary digest. Pasting the challenge and copying the signature
+   through the clipboard also works where Universal Clipboard does.
+5. Delete the files when done, and use *erase* in the app.
