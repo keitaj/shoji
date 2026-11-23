@@ -5,6 +5,7 @@ go 1.27.4
 require (
 	github.com/iden3/go-iden3-crypto v0.0.17
 	modernc.org/sqlite v1.63.0
+	rsc.io/qr v0.2.0
 )
 
 require (

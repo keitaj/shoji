@@ -68,6 +68,17 @@ func Challenge(ctx context.Context, hc *http.Client, base, app string) (*verifie
 	return &ch, nil
 }
 
+// ChallengeForSession requests a nonce for a verification session. The
+// application is the verifier's public origin, which the caller must already
+// know (it is where the request is being sent).
+func ChallengeForSession(ctx context.Context, hc *http.Client, base, origin, session string) (*verifier.ChallengeResponse, error) {
+	var ch verifier.ChallengeResponse
+	if _, err := post(ctx, hc, base+"/challenge", map[string]string{"app": origin, "session": session}, &ch); err != nil {
+		return nil, err
+	}
+	return &ch, nil
+}
+
 // Prove signs the challenge with the (mock) card and builds the request for
 // /verify. Only the proof and public values leave this function.
 func (h *Holder) Prove(ctx context.Context, ch *verifier.ChallengeResponse) (*verifier.VerifyRequest, error) {

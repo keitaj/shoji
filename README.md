@@ -18,11 +18,11 @@ personal data ever leaving their device.
 
 > [!WARNING]
 > **Status: proof of concept. Not for production.**
-> It has been run end to end with one real card and one iPhone: the card was read
-> and signed a challenge, the proof was generated on the phone, and a verifier
-> trusting only the real signing CA accepted it. Only the proof and the nullifier
-> left the phone. This was done with a development tool, not an app for end
-> users. Day-to-day development uses a mock CA. The circuit and its dependencies
+> It has been run end to end with one real card and one iPhone: scan a service's
+> QR code, tap the card, and the phone generates the proof and sends it to the
+> verifier, which trusted only the real signing CA and accepted it. Only the
+> proof and the nullifier left the phone. This ran on a local network with a
+> development build; nothing is deployed. Day-to-day development uses a mock CA. The circuit and its dependencies
 > are unaudited, and certificate expiry and revocation are not checked (see
 > [open questions](docs/open-questions.md)).
 
@@ -74,6 +74,27 @@ holder (device)                               verifier (server)
 The server builds every public input except the nullifier from its own state
 (`is_over_threshold` is fixed to 1). It stores only outstanding nonces and
 per-app nullifiers with a ban flag.
+
+For a web service, the verifier also offers **sessions**: the service's page
+shows a QR code, the user scans it with the phone, and the page learns the
+outcome and the nullifier.
+
+```
+service page                      verifier                         phone (shoji app)
+     │ POST /sessions                │                                   │
+     │ ─────────────────────────────▶│                                   │
+     │ shows QR: shoji://verify?u=<origin>&s=<session>   ── scanned ───▶ │
+     │                               │   POST /challenge {session}       │
+     │                               │ ◀──────────────────────────────── │ checks the request, asks for consent
+     │                               │                                   │ card: read + sign; prove on the device
+     │                               │   POST /verify {proof, …}         │
+     │ GET /sessions/<id> (polling)  │ ◀──────────────────────────────── │
+     │ ◀──────────────────────────── │ {status: verified, nullifier}     │
+```
+
+The phone derives `app_id` from the origin it is talking to, so a proof made for
+one service cannot be used at another, and it refuses a request whose date is
+not today, so a server cannot probe the date of birth by moving the date.
 
 ## Quick start
 
@@ -129,6 +150,15 @@ go run ./cmd/mockclient -cert testdata/minor.pem -key testdata/minor.key   # min
 
 `mockclient` plays the holder: a mock key on disk stands in for the card.
 
+To see the session flow in a browser, give the verifier its public origin and
+open `/demo`. With the iOS app from [`ios/`](ios/README.md) on the same network,
+scanning the QR code completes the verification with a real card:
+
+```sh
+go run ./cmd/verifier -listen 0.0.0.0:8080 -public-origin http://<this machine's LAN address>:8080 \
+    -trusted-ca <signing CA certificate>
+```
+
 ### Mock data
 
 The mock CA, the mock certificates in `testdata/` and the derived Noir fixtures
@@ -162,7 +192,7 @@ internal/verifier/  server and SQLite store
 internal/client/    holder side of the protocol
 docs/               threat model, open questions, benchmarks
 prover/             Rust library that generates proofs in-process, for phones (official Noir and Barretenberg crates only)
-ios/                development tool that reads a real card and proves on the device (iPhone)
+ios/                iOS app: verification from a QR code with a real card, proving on the device; developer tools
 ```
 
 ## Documentation
@@ -177,13 +207,17 @@ documents are authoritative.
 ## Roadmap
 
 Working today: the circuit, a mock CA, the verification server, negative tests
-and PC benchmarks. With one real card, a full proof has been made on an iPhone
-(card reading, signing and proving all on the device) and accepted.
+and PC benchmarks, verification sessions with a demo page, and an iOS app that
+goes from a scanned QR code to an accepted proof with a real card, proving on
+the device.
 
 Not implemented yet:
 
-- A reader app for end users. `ios/` is a development tool: it has no network
-  code, and the proof is relayed to the verifier by a Mac over the cable.
+- A deployed verifier (TLS, a public origin) and a distributed app. So far both
+  ran only on a local network, from a development build.
+- A defined way for a separate service to embed this (the demo page lives on the
+  verifier itself), and protection against a session's QR code being shown to
+  someone else (see the threat model).
 - Computing the CA key hash on the phone (the verifier's list is relayed to it),
   which matters once more than one CA key is trusted.
 - Android, and phones with less memory than the one tested.

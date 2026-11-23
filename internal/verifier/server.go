@@ -20,6 +20,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/keitaj/shoji/internal/proto"
@@ -77,7 +78,14 @@ type Config struct {
 	// trusts, as canonical hex (proto.FieldHex).
 	TrustedCAHashes []string
 	// Apps are the application identifiers the server issues challenges for.
-	Apps         []string
+	Apps []string
+	// PublicOrigin is the origin (scheme://host[:port]) under which holders'
+	// phones reach this server, e.g. "https://verify.example.jp". Setting it
+	// enables verification sessions. The application identifier of a session is
+	// this origin: the phone derives app_id from the origin it is talking to, so
+	// a proof made for one service cannot be passed on to another.
+	PublicOrigin string
+	SessionTTL   time.Duration
 	AgeThreshold uint8
 	NonceTTL     time.Duration
 	// MaxConcurrentVerifications bounds the number of bb processes.
@@ -100,6 +108,15 @@ type Server struct {
 func NewServer(cfg Config) (*Server, error) {
 	if cfg.Store == nil || cfg.Checker == nil {
 		return nil, errors.New("verifier: Store and Checker are required")
+	}
+	if cfg.PublicOrigin != "" {
+		if err := checkOrigin(cfg.PublicOrigin); err != nil {
+			return nil, err
+		}
+		cfg.Apps = append(cfg.Apps, cfg.PublicOrigin)
+	}
+	if cfg.SessionTTL <= 0 {
+		cfg.SessionTTL = 10 * time.Minute
 	}
 	if len(cfg.TrustedCAHashes) == 0 || len(cfg.Apps) == 0 {
 		return nil, errors.New("verifier: at least one trusted CA and one app are required")
@@ -135,16 +152,45 @@ func NewServer(cfg Config) (*Server, error) {
 	}
 	s.mux.HandleFunc("POST /challenge", s.handleChallenge)
 	s.mux.HandleFunc("POST /verify", s.handleVerify)
+	if cfg.PublicOrigin != "" {
+		s.mux.HandleFunc("POST /sessions", s.handleCreateSession)
+		s.mux.HandleFunc("GET /sessions/{id}", s.handleGetSession)
+		s.mux.HandleFunc("GET /sessions/{id}/qr.png", s.handleSessionQR)
+		s.mux.HandleFunc("GET /demo", s.handleDemo)
+	}
 	return s, nil
 }
 
-func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) { s.mux.ServeHTTP(w, r) }
+// ServeHTTP also logs one line per request: method, path and status only, never
+// a body, a nonce or a nullifier.
+func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+	s.mux.ServeHTTP(rec, r)
+	path := r.URL.Path
+	if strings.HasPrefix(path, "/sessions/") {
+		path = "/sessions/…" // session identifiers are capabilities; keep them out of logs
+	}
+	s.cfg.Log.Debug("request", "method", r.Method, "path", path, "status", rec.status)
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (r *statusRecorder) WriteHeader(status int) {
+	r.status = status
+	r.ResponseWriter.WriteHeader(status)
+}
 
 // jst is the calendar the age check uses.
 var jst = time.FixedZone("JST", 9*60*60)
 
 type challengeRequest struct {
 	App string `json:"app"`
+	// Session ties the challenge to a verification session (hex). The app must
+	// then be the server's public origin; it may be omitted.
+	Session string `json:"session,omitempty"`
 }
 
 // ChallengeResponse carries everything the holder needs to build the proof.
@@ -165,6 +211,24 @@ func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 	if !decodeJSON(w, r, &req) {
 		return
 	}
+	now := s.cfg.Now()
+	var session []byte
+	if req.Session != "" {
+		if req.App == "" {
+			req.App = s.cfg.PublicOrigin
+		}
+		id, err := hex.DecodeString(req.Session)
+		if err != nil || s.cfg.PublicOrigin == "" || req.App != s.cfg.PublicOrigin {
+			writeError(w, http.StatusBadRequest, "unknown session")
+			return
+		}
+		sess, err := s.cfg.Store.GetSession(r.Context(), id, now.Unix())
+		if err != nil || sess.Status != SessionPending {
+			writeError(w, http.StatusBadRequest, "unknown session")
+			return
+		}
+		session = id
+	}
 	if !s.apps[req.App] {
 		writeError(w, http.StatusBadRequest, "unknown app")
 		return
@@ -174,13 +238,13 @@ func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
-	now := s.cfg.Now()
 	c := Challenge{
 		Nonce:        nonce,
 		App:          req.App,
 		CurrentDate:  proto.DateInt(now.In(jst)),
 		AgeThreshold: s.cfg.AgeThreshold,
 		ExpiresAt:    now.Add(s.cfg.NonceTTL).Unix(),
+		Session:      session,
 	}
 	if err := s.cfg.Store.PutChallenge(r.Context(), c, now.Unix()); err != nil {
 		s.cfg.Log.Error("store challenge", "err", err)
@@ -240,6 +304,23 @@ func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Whatever happens from here on, a session this challenge belongs to gets an
+	// outcome: rejected unless the proof is accepted below.
+	accepted := false
+	var acceptedNullifier []byte
+	acceptedNew := false
+	if ch.Session != nil {
+		defer func() {
+			status := SessionRejected
+			if accepted {
+				status = SessionVerified
+			}
+			if err := s.cfg.Store.FinishSession(context.WithoutCancel(r.Context()), ch.Session, status, acceptedNullifier, acceptedNew); err != nil {
+				s.cfg.Log.Error("finish session", "err", err)
+			}
+		}()
+	}
+
 	// The CA key hash is only an index into our own trusted list.
 	if !s.trusted[proto.FieldHex(caHash)] {
 		s.cfg.Log.Info("verify rejected", "reason", "untrusted CA")
@@ -297,6 +378,7 @@ func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusForbidden, "banned")
 		return
 	}
+	accepted, acceptedNullifier, acceptedNew = true, nb[:], isNew
 	s.cfg.Log.Info("verify accepted", "app", ch.App, "new", isNew)
 	writeJSON(w, http.StatusOK, VerifyResponse{OK: true, Nullifier: "0x" + hex.EncodeToString(nb[:]), New: isNew})
 }

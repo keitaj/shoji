@@ -29,3 +29,12 @@ func TestChallengeVector(t *testing.T) {
 		t.Fatalf("digest: got %s", got)
 	}
 }
+
+// Also checked in ios/ShojiCardKit (VerificationLinkTests.swift): the phone
+// derives app_id from the origin it talks to, and must agree with the server.
+func TestAppIDOfOriginVector(t *testing.T) {
+	const want = "0x00d1b8790504951c2f3c74c61299b9cfb8634ca1b0dc8e3b6ae57475bc37790a"
+	if got := FieldHex(AppID("https://verifier.example")); got != want {
+		t.Fatalf("app_id: got %s", got)
+	}
+}

@@ -2,6 +2,7 @@ package verifier_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -19,6 +20,9 @@ import (
 )
 
 const app = "test-app"
+
+// origin is the verifier's public origin in tests; sessions use it as the app.
+const origin = "https://verifier.example"
 
 type env struct {
 	t     *testing.T
@@ -52,6 +56,7 @@ func newEnv(t *testing.T) *env {
 		Checker:         verifier.BBChecker{BB: tools.BB, VK: tools.VK},
 		TrustedCAHashes: []string{proto.FieldHex(caHash)},
 		Apps:            []string{app, "other-app"},
+		PublicOrigin:    origin,
 		Now: func() time.Time {
 			mu.Lock()
 			defer mu.Unlock()
@@ -284,5 +289,145 @@ func TestProofFromExternallyMadeSignature(t *testing.T) {
 	other := e.challenge(app)
 	if _, err := h.ProveWithSignature(context.Background(), other, sign(ch)); err == nil {
 		t.Fatal("a signature for a different nonce must be refused")
+	}
+}
+
+// --- Verification sessions (what a relying web page uses) ---
+
+func (e *env) newSession() string {
+	e.t.Helper()
+	res, err := http.Post(e.url+"/sessions", "application/json", nil)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var out struct {
+		Session string `json:"session"`
+		Link    string `json:"link"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil || len(out.Session) != 32 {
+		e.t.Fatalf("create session: %v %+v", err, out)
+	}
+	if want := "shoji://verify?u=https%3A%2F%2Fverifier.example&s=" + out.Session; out.Link != want {
+		e.t.Fatalf("link: got %s", out.Link)
+	}
+	return out.Session
+}
+
+func (e *env) sessionStatus(id string) (int, verifier.SessionResponse) {
+	e.t.Helper()
+	res, err := http.Get(e.url + "/sessions/" + id)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	defer res.Body.Close()
+	var out verifier.SessionResponse
+	_ = json.NewDecoder(res.Body).Decode(&out)
+	return res.StatusCode, out
+}
+
+func (e *env) sessionChallenge(id string) (*verifier.ChallengeResponse, error) {
+	return client.ChallengeForSession(context.Background(), http.DefaultClient, e.url, origin, id)
+}
+
+func TestSessionReportsOutcomeToRelyingPage(t *testing.T) {
+	e := newEnv(t)
+	id := e.newSession()
+	if status, s := e.sessionStatus(id); status != http.StatusOK || s.Status != "pending" || s.Nullifier != "" {
+		t.Fatalf("new session: %d %+v", status, s)
+	}
+
+	ch, err := e.sessionChallenge(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The application of a session is the verifier's origin.
+	if ch.AppID != proto.FieldHex(proto.AppID(origin)) {
+		t.Fatal("session challenge is not for the origin's app_id")
+	}
+	status, res, msg := e.submit(e.prove(e.holder("adult", "ca"), ch))
+	if status != http.StatusOK {
+		t.Fatalf("verify: %d %s", status, msg)
+	}
+	_, s := e.sessionStatus(id)
+	if s.Status != "verified" || s.Nullifier != res.Nullifier || !s.New {
+		t.Fatalf("session after verification: %+v", s)
+	}
+
+	// One session, one verification.
+	if _, err := e.sessionChallenge(id); err == nil {
+		t.Fatal("a finished session must not issue another challenge")
+	}
+}
+
+func TestSessionRejectedWhenProofIsNotAccepted(t *testing.T) {
+	e := newEnv(t)
+	id := e.newSession()
+	ch, err := e.sessionChallenge(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e.expectReject(e.prove(e.holder("minor", "ca"), ch), http.StatusForbidden, "invalid proof")
+	if _, s := e.sessionStatus(id); s.Status != "rejected" || s.Nullifier != "" {
+		t.Fatalf("session after rejection: %+v", s)
+	}
+}
+
+func TestSessionRules(t *testing.T) {
+	e := newEnv(t)
+	id := e.newSession()
+
+	// A session challenge is only issued for the origin, never for another app.
+	if _, err := client.ChallengeForSession(context.Background(), http.DefaultClient, e.url, app, id); err == nil {
+		t.Fatal("a session must not be usable with another app")
+	}
+	// Unknown and malformed sessions.
+	if _, err := e.sessionChallenge("00000000000000000000000000000000"); err == nil {
+		t.Fatal("unknown session should be refused")
+	}
+	if status, _ := e.sessionStatus("zz"); status != http.StatusNotFound {
+		t.Fatalf("malformed id: %d", status)
+	}
+	// Sessions expire.
+	e.advance(11 * time.Minute)
+	if status, _ := e.sessionStatus(id); status != http.StatusNotFound {
+		t.Fatalf("expired session: %d", status)
+	}
+	if _, err := e.sessionChallenge(id); err == nil {
+		t.Fatal("expired session should be refused")
+	}
+}
+
+func TestSessionQRAndDemoPage(t *testing.T) {
+	e := newEnv(t)
+	id := e.newSession()
+	res, err := http.Get(e.url + "/sessions/" + id + "/qr.png")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer res.Body.Close()
+	head := make([]byte, 8)
+	_, _ = res.Body.Read(head)
+	if res.StatusCode != http.StatusOK || string(head[1:4]) != "PNG" {
+		t.Fatalf("qr: %d %q", res.StatusCode, head)
+	}
+	page, err := http.Get(e.url + "/demo")
+	if err != nil {
+		t.Fatal(err)
+	}
+	page.Body.Close()
+	if page.StatusCode != http.StatusOK {
+		t.Fatalf("demo page: %d", page.StatusCode)
+	}
+}
+
+func TestPublicOriginMustBeCanonical(t *testing.T) {
+	store, _ := verifier.OpenStore(":memory:")
+	defer store.Close()
+	for _, bad := range []string{"verifier.example", "https://verifier.example/", "https://Verifier.example", "https://verifier.example/path", "ftp://verifier.example", "https://user@verifier.example"} {
+		_, err := verifier.NewServer(verifier.Config{Store: store, Checker: verifier.BBChecker{}, TrustedCAHashes: []string{"0x01"}, PublicOrigin: bad})
+		if err == nil {
+			t.Fatalf("origin %q should be refused", bad)
+		}
 	}
 }

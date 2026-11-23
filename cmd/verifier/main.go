@@ -36,6 +36,8 @@ func main() {
 	apps := flag.String("apps", "demo", "comma-separated application identifiers")
 	age := flag.Uint("age", 18, "age threshold")
 	ttl := flag.Duration("nonce-ttl", 5*time.Minute, "nonce lifetime")
+	verbose := flag.Bool("v", false, "also log one line per request (method, path, status)")
+	origin := flag.String("public-origin", "", "origin under which phones reach this server, e.g. https://verify.example.jp; enables sessions and /demo")
 	flag.Parse()
 
 	if *cas == "" {
@@ -65,12 +67,17 @@ func main() {
 		log.Fatal(err)
 	}
 	defer store.Close()
-	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	level := slog.LevelInfo
+	if *verbose {
+		level = slog.LevelDebug
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
 	srv, err := verifier.NewServer(verifier.Config{
 		Store:           store,
 		Checker:         verifier.BBChecker{BB: *bb, VK: *vk},
 		TrustedCAHashes: hashes,
 		Apps:            strings.Split(*apps, ","),
+		PublicOrigin:    *origin,
 		AgeThreshold:    uint8(*age),
 		NonceTTL:        *ttl,
 		Log:             logger,

@@ -1,12 +1,20 @@
-# shoji card probe (iOS)
+# shoji for iOS
 
-A development tool, not a product: it reads the JPKI certificates from a real
-My Number Card so that their **structure** can be compared with the mock
-certificates, using `cmd/certinspect` on your own Mac, and it can make a full
-proof on the phone: read the card, have it sign a verifier's challenge and
-generate the proof, so that only the proof and the nullifier leave the device.
-It has no network code (a Mac relays the request and the proof over the cable)
-and keeps no certificate after it leaves the foreground.
+Two things in one app:
+
+- **Verification** (the main screen): opened from a service's QR code
+  (`shoji://verify?u=<origin>&s=<session>`), it shows who is asking and what
+  will be disclosed, reads the card with one tap, generates the proof on the
+  phone and sends it to that service's verifier. Only the proof and the
+  nullifier leave the phone.
+- **Developer tools** (button at the top right): read the JPKI certificates from
+  a real card so that their **structure** can be compared with the mock
+  certificates using `cmd/certinspect`, sign a challenge for a proof made on a
+  Mac, prove on the device from a request relayed over the cable, and benchmark
+  on-device proving.
+
+The app's only network code is `App/VerifierClient.swift`: two requests to the
+origin named by the link. It keeps no certificate after a verification.
 
 > [!CAUTION]
 > - The signing password (6-16 letters and digits) **locks after 5 consecutive
@@ -56,7 +64,19 @@ open ShojiProbe.xcodeproj
 Connect the iPhone and run. `Local.xcconfig` keeps your team identifier out of
 the repository and across `xcodegen generate`.
 
-## Use
+## Verify with a service
+
+Start a verifier with a public origin the phone can reach and open its demo page
+(see the repository README). Scan the QR code with the iPhone camera, check the
+request, enter the signing password and tap the card. For a verifier on the same
+network over plain http, iOS asks once for permission to use the local network;
+the first attempt can fail until it is granted.
+
+The phone refuses a request whose `app_id` is not the one of the origin it is
+talking to, whose date is not today, or which comes over plain http from outside
+the local network.
+
+## Developer tools
 
 1. **Read without the password.** Reads the signing CA certificate and the
    number of password attempts left. No password is sent, so this step cannot

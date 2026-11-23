@@ -35,6 +35,10 @@
 | 未成年が `is_over_threshold=0` の証明を出す | サーバは 1 を公開入力に固定する | `TestMinorIsRejected` |
 | nullifier の差し替え・公開鍵の差し替え | nullifier は署名済みTBS内の公開鍵と app_id だけで決まる | `fail_substituted_public_key`, `TestNullifierCannotBeSubstituted` |
 | BANされた人の再登録 | アプリ別 nullifier のBANフラグ | `TestBannedNullifier` |
+| サービスが、別のサービスで通用する証明を端末に求める（そこでの nullifier を知る、または中継する） | 端末が通信相手のオリジンから `app_id` を導き、それ以外を拒否する | `testRefusesAnotherServicesAppID`, `testAppIDMatchesTheGoVector` |
+| サービスが `current_date` を変えながら繰り返し確認させ、生年月日を探る | 端末は今日（±1日）でない日付を拒否し、カードを使う前に年齢の閾値を表示する | `testRefusesDatesThatAreNotToday` |
+| リンクがインターネット上の平文 http サーバへ誘導する | http はローカルネットワークのアドレスに限り、警告つきで受け付ける | `testPlainHTTPOnlyOnTheLocalNetwork` |
+| セッションの使い回し・放置 | 1セッションにつき結果は1つ。セッションには期限がある | `TestSessionReportsOutcomeToRelyingPage`, `TestSessionRules` |
 
 各ネガティブテストは、通るケースから1点だけ変えたものにしている。改ざんしたTBSが構文上は正しく読めること
 （＝止めているのが署名検証であること）は `tampered_date_of_birth_parses` / `substituted_public_key_parses` で確認している。
@@ -53,6 +57,13 @@
 - 証明書の有効期限と失効を見ていない。期限切れ・失効済みのカードでも通る。
 - 証明書の再発行で nullifier が変わる。証明書を持つ第三者は nullifier を計算できる（[open-questions.md](open-questions.md)）。
 - カードと暗証番号を借りた・盗んだ場合は防げない。
+- **QR コードによるセッションの乗っ取り。** セッションを開いた者がその結果を受け取る。攻撃者が自分の QR コードを
+  被害者に読み取らせると（フィッシングページなど）、攻撃者のセッションが被害者によって確認済みになる。
+  端末はオリジンを表示するので偽サービスは見分けられるが、本物のサービスの QR コードを中継された場合は防げない。
+  QR コードによるログイン全般の弱点で、対策していない。
+- 今日の日付を正直に使うサービスでも、確認1回につき1ビットは知る。訪問のたびに年齢の閾値を変えることもできる。
+  端末は閾値を表示するが、決まった値に限定はしていない。
+- 信頼するCA鍵が複数あると、端末は自分のカードのハッシュがどれかを判別できない。その場合は推測せず拒否する。
 - サーバはレート制限・呼び出し元アプリの認証・TLS を持たない（PoC）。`/challenge` は設定済みの app 名なら誰でも呼べる。
 - nullifier のテーブルを見られる者は、あるアプリの利用者数は分かる。
 - 端末側の証明生成ソフトが改ざんされていれば、個人情報の流出は防げない（オープンソースと再現可能ビルドで対処する領域）。端末内の証明生成（`prover/`）はソースからビルドし、Noir と Barretenberg の公式クレートだけに依存するが、Aztec が配布するビルド済みの Barretenberg 静的ライブラリ（チェックサム固定）をリンクしている。これは自分たちでビルドも監査もしていない。

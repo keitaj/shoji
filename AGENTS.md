@@ -25,8 +25,10 @@ that the user is "a real person aged 18 or over", together with a "per-applicati
 - On-device proving: `prover/` (Rust) runs Noir witness generation and Barretenberg proving in-process. It
   depends only on the official crates (acvm/nargo/noirc_abi at Noir v1.0.0, barretenberg-rs 6.0.0); do not
   add third-party proving wrappers or prebuilt binaries from other sources
-- Card reading: `ios/` is a development tool (Swift, CoreNFC) that reads a real card, has it sign a
-  challenge and proves on the device. It has no network code; a Mac relays the proof (`cmd/cardclient`)
+- iOS app (`ios/`, Swift, CoreNFC): opened from a service's QR code, it reads the card, has it sign the
+  challenge, proves on the device and sends the proof to the verifier. Its only network code is
+  `App/VerifierClient.swift` (two requests, to the origin named by the link). Developer tools for
+  inspecting a card are behind a button in the same app
 
 The authoritative versions are in README.md, `circuits/Nargo.toml` and `go.mod`.
 
@@ -77,7 +79,7 @@ internal/           the other Go packages (mockjpki, witness, prover, verifier, 
 testdata/           mock certificates and keys (generated, not in git; never put real personal data here)
 docs/               threat model, open questions, benchmarks (English is authoritative; Japanese in docs/ja/)
 prover/             Rust library that generates proofs in-process, for phones
-ios/                development tool that reads a real card and proves on the device (iPhone)
+ios/                iOS app (verification from a QR code, proving on the device) and developer tools
 ```
 
 ## What is implemented (without a real card)
@@ -113,6 +115,9 @@ card's certificate.
   assembled in `prover/src/inputs.rs`; keep it in step with `internal/witness` (a test compares them).
 - Update docs/threat-model.md when the set of attacks or guarantees changes. When changing an English
   document under docs/, update docs/ja/ as well.
+- The phone, not the server, decides which application a proof is for: `app_id` is derived from the origin
+  the phone talks to (`VerificationLink.appID`, same value as `proto.AppID(origin)`). Do not add a path
+  where the server chooses `app_id`, the date or the CA hash without the phone checking it.
 - The rules for external contributors are in CONTRIBUTING.md.
 
 ## Not implemented yet (notes)
@@ -120,8 +125,9 @@ card's certificate.
 - A reader app that selects the JPKI AP, reads the signing certificate and, after PIN entry, has the
   card sign the nonce. Confirm APDUs and the file layout from existing open-source implementations and
   official documentation before implementing (do not write them from guesses).
-- A full proof with one real card has been made on an iPhone (reading, signing and proving on the device)
-  and accepted. What remains is an app for end users (talking to the verifier itself).
+- The whole user flow has run with one real card on a local network: scan the service's QR code, tap the
+  card, proof generated on the phone and accepted. What remains is deployment (TLS, a public origin,
+  app distribution) and a defined way for a separate service to embed it.
 - On-device proving on other phones: measured only on an iPhone 15 Pro (about 1.8 s, 506 MiB). Low-memory
   phones and Android are untested (time and memory decide whether this is viable as a business).
 - Revocation checking falls under the accreditation scheme for public personal authentication and is

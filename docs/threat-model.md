@@ -40,6 +40,10 @@ directory that is removed when proving ends.
 | A minor submits a proof with `is_over_threshold = 0` | The server fixes that public input to 1 | `TestMinorIsRejected` |
 | Substitute the nullifier or the public key | The nullifier depends only on the public key inside the signed TBS and on `app_id` | `fail_substituted_public_key`, `TestNullifierCannotBeSubstituted` |
 | A banned person registers again | Per-app ban flag on the nullifier | `TestBannedNullifier` |
+| A service asks the phone for a proof that is valid at another service (to learn the nullifier there, or to relay it) | The phone derives `app_id` from the origin it is talking to and refuses any other | `testRefusesAnotherServicesAppID`, `testAppIDMatchesTheGoVector` |
+| A service probes the date of birth by choosing `current_date` over repeated verifications | The phone refuses a date that is not today (±1 day) and shows the age threshold before the card is used | `testRefusesDatesThatAreNotToday` |
+| A link sends the phone to a plain-http server on the internet | http is accepted only for local-network addresses, with a warning | `testPlainHTTPOnlyOnTheLocalNetwork` |
+| A session is reused or outlives its purpose | One outcome per session; sessions expire | `TestSessionReportsOutcomeToRelyingPage`, `TestSessionRules` |
 
 Each negative test is a passing case with exactly one thing changed.
 `tampered_date_of_birth_parses` and `substituted_public_key_parses` confirm that
@@ -68,6 +72,17 @@ check that stops them.
 - Reissuing the certificate changes the nullifier, and a third party holding the
   certificate can compute the nullifier ([open questions](open-questions.md)).
 - A borrowed or stolen card together with its PIN is not defended against.
+- **Session hijacking through the QR code.** Whoever opens a session receives its
+  outcome. An attacker who gets a victim to scan the attacker's QR code (on a
+  phishing page, for example) has their own session verified by the victim. The
+  phone shows the origin, which stops a look-alike service but not a relayed QR
+  code of the real one. This is the general weakness of QR-code logins and is
+  not addressed.
+- A service that honestly uses today's date still learns one bit per
+  verification, and could vary the age threshold between visits; the phone shows
+  the threshold but does not restrict it to a fixed set.
+- With more than one trusted CA key the phone cannot tell which hash is its
+  card's; that case is refused rather than guessed.
 - The server has no rate limiting, no authentication of calling applications and
   no TLS (proof of concept). Anyone can call `/challenge` for a configured app.
 - Whoever can read the nullifier table learns how many users an app has.
