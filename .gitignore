@@ -10,3 +10,13 @@ Prover.toml
 # a published mock CA key could forge certificates for a verifier that trusts it.
 /testdata/
 /circuits/src/fixtures.nr
+
+# iOS card probe: generated project and build output.
+/ios/*.xcodeproj/
+/ios/**/.build/
+/ios/**/.swiftpm/
+xcuserdata/
+# Real certificates must never be committed. Keep them outside the repository;
+# these patterns are only a last line of defence.
+*.der
+/real/

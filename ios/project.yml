@@ -1,0 +1,32 @@
+# XcodeGen spec: `xcodegen generate` in this directory creates ShojiProbe.xcodeproj.
+name: ShojiProbe
+options:
+  deploymentTarget:
+    iOS: "16.0"
+packages:
+  ShojiCardKit:
+    path: ShojiCardKit
+targets:
+  ShojiProbe:
+    type: application
+    platform: iOS
+    sources:
+      - path: App
+        excludes:
+          - Info.plist
+          - ShojiProbe.entitlements
+    dependencies:
+      - package: ShojiCardKit
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: io.github.keitaj.shoji.probe
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "5.0"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_FILE: App/Info.plist
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_CFBundleDisplayName: shoji probe
+        CODE_SIGN_ENTITLEMENTS: App/ShojiProbe.entitlements
+        CODE_SIGN_STYLE: Automatic
+        TARGETED_DEVICE_FAMILY: "1"
