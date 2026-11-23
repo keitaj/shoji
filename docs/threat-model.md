@@ -73,7 +73,10 @@ check that stops them.
 - Whoever can read the nullifier table learns how many users an app has.
 - If the proving software on the device is tampered with, leakage of personal
   data cannot be prevented (to be addressed by open source and reproducible
-  builds).
+  builds). The on-device prover (`prover/`) is built from source and depends only
+  on the official Noir and Barretenberg crates, but it links Aztec's prebuilt
+  Barretenberg static library (checksum-pinned), which we have not built or
+  audited ourselves.
 - The certificate structure was checked against a single real card. A card whose
   structure differs (for example a TBSCertificate longer than the buffer) is
   rejected by the circuit; it is not wrongly accepted.

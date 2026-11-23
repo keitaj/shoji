@@ -114,6 +114,25 @@ public struct JPKICard<Transport: CardTransport> {
         return res.data
     }
 
+    /// Reads the signing certificate and has the card sign `challenge`, with a
+    /// single password verification. This is what on-device proving needs: both
+    /// stay in the caller's memory and neither has to leave the phone.
+    public func readSignCertificateAndSign(_ challenge: Challenge, password: String) async throws
+        -> (certificate: Data, signature: Data)
+    {
+        try await verifySignPassword(password)
+        try await selectFile(JPKIFile.signCertificate, "SELECT sign certificate")
+        let certificate = try await readCertificate("READ sign certificate")
+        try await selectFile(JPKIFile.signKey, "SELECT sign key")
+        let res = try await transport.transmit(
+            CommandAPDU(cla: 0x80, ins: 0x2A, p1: 0x00, p2: 0x80, data: challenge.digestInfo, le: 256))
+        guard res.isOK else { throw CardError.status(step: "SIGN", sw: res.sw) }
+        guard res.data.count == 256 else {
+            throw CardError.unexpectedData("SIGN: signature is not 256 bytes")
+        }
+        return (certificate, res.data)
+    }
+
     /// Verifies the signing password: at most one attempt, and none at all unless
     /// at least `minimumAttemptsToTry` attempts remain.
     private func verifySignPassword(_ password: String) async throws {

@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"crypto/rsa"
 	"crypto/x509"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"log"
@@ -32,6 +33,8 @@ func main() {
 	dir := flag.String("testdata", "testdata", "directory holding mock keys and certificates")
 	out := flag.String("out", "circuits/src/fixtures.nr", "Noir fixture file to write")
 	proverTOML := flag.String("prover-toml", "", "also write circuit inputs for the adult fixture to this path (for benchmarks)")
+	inputsJSON := flag.String("inputs-json", "", "also write the same inputs as JSON to this path (for on-device benchmarks)")
+	cardFixture := flag.String("card-fixture", "", "also write to this directory what a phone would hold for the adult fixture (cert.der, ca.der, nonce_sig.bin, request.json) and the expected inputs.json")
 	flag.Parse()
 	log.SetFlags(0)
 
@@ -144,7 +147,7 @@ func main() {
 	}
 	log.Printf("wrote %s", *out)
 
-	if *proverTOML != "" {
+	if *proverTOML != "" || *inputsJSON != "" || *cardFixture != "" {
 		cert, key := loadOrIssue(*dir, specs[0], cas["ca"])
 		sig, err := witness.SignNonce(key, appID, nonce)
 		if err != nil {
@@ -154,8 +157,42 @@ func main() {
 		if err != nil {
 			log.Fatal(err)
 		}
-		if err := os.WriteFile(*proverTOML, []byte(in.ProverTOML()), 0o600); err != nil {
-			log.Fatal(err)
+		if *proverTOML != "" {
+			if err := os.WriteFile(*proverTOML, []byte(in.ProverTOML()), 0o600); err != nil {
+				log.Fatal(err)
+			}
+		}
+		if *cardFixture != "" {
+			must := func(err error) {
+				if err != nil {
+					log.Fatal(err)
+				}
+			}
+			must(os.MkdirAll(*cardFixture, 0o755))
+			inputs, err := in.JSON()
+			must(err)
+			request, err := json.Marshal(map[string]any{
+				"challenge":      proto.ChallengeString(appID, nonce),
+				"current_date":   in.CurrentDate,
+				"age_threshold":  in.AgeThreshold,
+				"ca_pubkey_hash": proto.FieldHex(in.CAPubkeyHash),
+			})
+			must(err)
+			for name, data := range map[string][]byte{
+				"cert.der": cert.Raw, "ca.der": cas["ca"].Cert.Raw, "nonce_sig.bin": sig,
+				"request.json": request, "inputs.json": inputs,
+			} {
+				must(os.WriteFile(filepath.Join(*cardFixture, name), data, 0o600))
+			}
+		}
+		if *inputsJSON != "" {
+			raw, err := in.JSON()
+			if err != nil {
+				log.Fatal(err)
+			}
+			if err := os.WriteFile(*inputsJSON, raw, 0o600); err != nil {
+				log.Fatal(err)
+			}
 		}
 	}
 }

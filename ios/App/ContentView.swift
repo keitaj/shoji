@@ -1,5 +1,6 @@
 import CoreNFC
 import ShojiCardKit
+import ShojiProverKit
 import SwiftUI
 
 /// A development tool for checking the structure of a real JPKI signing
@@ -20,6 +21,10 @@ struct ContentView: View {
     @State private var challengeText = ""
     @State private var signatureHex = ""
     @State private var confirmSign = false
+    @State private var proveReport = ""
+    @State private var confirmProve = false
+    @State private var benchReport = ""
+    @State private var benchRunning = false
     @State private var nfc = NFCCardSession()
 
     var body: some View {
@@ -63,7 +68,6 @@ struct ContentView: View {
                         } else {
                             ShareLink(items: exported) { Text("共有シートを開く") }
                         }
-                        Button("読み取ったデータを消去", role: .destructive) { wipe() }
                     }
                 }
 
@@ -90,8 +94,38 @@ struct ContentView: View {
                     }
                 }
 
+                Section("6. カードで証明を作る（端末内で完結）") {
+                    Text("Mac から受け取ったリクエストに対し、カードの読み取り・署名・証明の生成をこの iPhone の中だけで行います。証明書は iPhone の外に出ません。Mac に渡すのは、証明と匿名ID だけです。上の暗証番号欄に署名用暗証番号を入力してください。")
+                        .font(.footnote)
+                    Button("リクエストを読み込んで証明を作る") { confirmProve = true }
+                        .disabled(busy || benchRunning || password.isEmpty || attemptsLeft == nil)
+                    if !proveReport.isEmpty {
+                        Text(proveReport).font(.footnote.monospaced())
+                    }
+                }
+
+                Section("5. 端末上で証明を生成する（計測）") {
+                    Text("合成データ（モック証明書）で、この iPhone の中だけで証明を3回生成し、時間とメモリを測ります。カードも個人情報も使いません。")
+                        .font(.footnote)
+                    Button(benchRunning ? "計測中…" : "計測する") { runBenchmark() }
+                        .disabled(benchRunning || busy)
+                    if !benchReport.isEmpty {
+                        Text(benchReport).font(.footnote.monospaced())
+                    }
+                }
+
                 if !message.isEmpty {
                     Section("結果") { Text(message) }
+                }
+
+                // Always available, whatever state the app is in.
+                Section("データの消去") {
+                    Text("アプリ内に残っているもの（読み取った証明書、署名、Mac との受け渡し用ファイル、計測結果）をすべて消します。")
+                        .font(.footnote)
+                    Button("アプリ内のデータを消去", role: .destructive) {
+                        wipe()
+                        message = "消去しました。"
+                    }
                 }
             }
             .navigationTitle("shoji card probe")
@@ -112,6 +146,18 @@ struct ContentView: View {
                     }
                 }
                 Button("やめる", role: .cancel) {}
+            }
+            .confirmationDialog(
+                "カードの署名用の鍵で署名し、この iPhone で証明を作ります。暗証番号が間違っていると試行回数が1回減ります。",
+                isPresented: $confirmProve, titleVisibility: .visible
+            ) {
+                Button("実行する") { proveOnDevice() }
+                Button("やめる", role: .cancel) {}
+            }
+            .task {
+                // `-shoji-bench` on the command line (used when driving the device from
+                // the Mac) runs the benchmark immediately.
+                if CommandLine.arguments.contains("-shoji-bench") { runBenchmark() }
             }
             .onChange(of: scenePhase) { phase in
                 // Nothing personal stays around once the app leaves the foreground. The
@@ -191,6 +237,99 @@ struct ContentView: View {
         message = (try? Challenge(challengeText)) == nil ? "受け取ったチャレンジの形式が正しくありません。" : "チャレンジを読み込みました。"
     }
 
+    private static var requestFile: URL { documents.appendingPathComponent("request.json") }
+    private static var submissionFile: URL { documents.appendingPathComponent("submission.json") }
+
+    /// Card -> certificate + signature -> proof, all on this device. The certificate
+    /// lives only in local variables here; it is never stored in view state, written
+    /// to disk or offered for export.
+    private func proveOnDevice() {
+        proveReport = ""
+        message = ""
+        guard let request = try? Data(contentsOf: Self.requestFile),
+            let object = try? JSONSerialization.jsonObject(with: request) as? [String: Any],
+            let challengeText = object["challenge"] as? String,
+            let challenge = try? Challenge(challengeText)
+        else {
+            message = "リクエストのファイルがないか、形式が正しくありません。Mac から送ってください。"
+            return
+        }
+        let pin = password
+        busy = true
+        try? FileManager.default.removeItem(at: Self.submissionFile)
+        Task { @MainActor in
+            defer {
+                busy = false
+                password = ""
+            }
+            do {
+                let out = try await nfc.run(.certificateAndSignature(challenge: challenge, password: pin))
+                attemptsLeft = out.attemptsLeft ?? attemptsLeft
+                guard let certificate = out.signCertificate, let ca = out.caCertificate, let signature = out.signature else {
+                    message = "カードから必要なデータを読み取れませんでした。"
+                    return
+                }
+                proveReport = "証明を生成しています…"
+                let submission = Self.submissionFile
+                let report = await Task.detached(priority: .userInitiated) { () -> String in
+                    do {
+                        let material = try OnDeviceProver.loadMaterial()
+                        let start = Date()
+                        let proof = try Prover.prove(
+                            circuit: material.circuit, certificate: certificate, caCertificate: ca,
+                            signature: signature, request: request, srs: material.srs,
+                            verificationKey: material.verificationKey)
+                        let seconds = Date().timeIntervalSince(start)
+                        func hex(_ d: Data?) -> String { "0x" + (d ?? Data()).map { String(format: "%02x", $0) }.joined() }
+                        // The proof must be for this request, and the holder must meet the threshold.
+                        guard proof.publicValue(1) == challenge.nonce, proof.publicValue(2) == challenge.appID else {
+                            return "証明がリクエストと一致しません。"
+                        }
+                        guard proof.publicValue(6)?.last == 1 else {
+                            return "証明は生成できましたが、年齢の条件を満たしていません。検証サーバは受理しません。"
+                        }
+                        // Exactly what the verifier is meant to see, and nothing else.
+                        let body: [String: String] = [
+                            "nonce": hex(challenge.nonce),
+                            "ca_pubkey_hash": hex(proof.publicValue(0)),
+                            "nullifier": hex(proof.publicValue(5)),
+                            "proof": proof.proof.base64EncodedString(),
+                        ]
+                        try JSONSerialization.data(withJSONObject: body).write(to: submission, options: .atomic)
+                        return String(
+                            format: "証明を生成しました: %.2f 秒、%d バイト\n最大メモリ %.0f MiB\nMac から submission.json を取り出してください。",
+                            seconds, proof.proof.count, OnDeviceProver.peakFootprintMiB())
+                    } catch {
+                        return "証明の生成に失敗しました: \(error)"
+                    }
+                }.value
+                proveReport = report
+                try? FileManager.default.removeItem(at: Self.requestFile)
+            } catch {
+                if case CardError.wrongPassword(let remaining) = error { attemptsLeft = remaining }
+                message = describe(error)
+            }
+        }
+    }
+
+    private func runBenchmark() {
+        benchRunning = true
+        benchReport = ""
+        Task.detached(priority: .userInitiated) {
+            let (report, last) = OnDeviceProver.benchmark(runs: 3)
+            // Also left in Documents so the Mac can collect them over the cable. The
+            // proof is of synthetic data.
+            let documents = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            try? last?.proof.write(to: documents.appendingPathComponent("bench_proof"), options: .atomic)
+            try? last?.publicInputs.write(to: documents.appendingPathComponent("bench_public_inputs"), options: .atomic)
+            try? Data(report.utf8).write(to: documents.appendingPathComponent("bench.txt"), options: .atomic)
+            await MainActor.run {
+                benchReport = report
+                benchRunning = false
+            }
+        }
+    }
+
     private func prepareExport() {
         removeExportedFiles()
         let dir = FileManager.default.temporaryDirectory.appendingPathComponent("shoji-probe", isDirectory: true)
@@ -221,6 +360,13 @@ struct ContentView: View {
         signatureHex = ""
         challengeText = ""
         if !keepHandOffFiles {
+            proveReport = ""
+            benchReport = ""
+            for name in ["bench.txt", "bench_proof", "bench_public_inputs"] {
+                try? FileManager.default.removeItem(at: Self.documents.appendingPathComponent(name))
+            }
+            try? FileManager.default.removeItem(at: Self.requestFile)
+            try? FileManager.default.removeItem(at: Self.submissionFile)
             try? FileManager.default.removeItem(at: Self.challengeFile)
             try? FileManager.default.removeItem(at: Self.signatureFile)
         }

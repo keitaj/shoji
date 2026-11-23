@@ -8,6 +8,7 @@ import (
 	"crypto/rsa"
 	"crypto/sha256"
 	"crypto/x509"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -106,6 +107,40 @@ func LimbList(x *big.Int, quote bool) string {
 		parts = append(parts, s)
 	}
 	return "[" + strings.Join(parts, ", ") + "]"
+}
+
+// JSON renders the inputs as a JSON object keyed by the parameter names of
+// main(), for provers that take inputs as a map (e.g. the iOS app): byte arrays
+// as arrays of numbers, limbs and field elements as hex strings.
+func (in *Inputs) JSON() ([]byte, error) {
+	bytesOf := func(b []byte) []int {
+		out := make([]int, len(b))
+		for i, v := range b {
+			out[i] = int(v)
+		}
+		return out
+	}
+	limbsOf := func(x *big.Int) []string {
+		out := make([]string, 0, proto.NumLimbs)
+		for _, l := range proto.Limbs(x) {
+			out = append(out, "0x"+l.Text(16))
+		}
+		return out
+	}
+	return json.Marshal(map[string]any{
+		"ca_pubkey_hash": proto.FieldHex(in.CAPubkeyHash),
+		"nonce":          proto.FieldHex(in.Nonce),
+		"app_id":         proto.FieldHex(in.AppID),
+		"current_date":   in.CurrentDate,
+		"age_threshold":  in.AgeThreshold,
+		"tbs":            bytesOf(in.PaddedTBS()),
+		"tbs_len":        len(in.TBS),
+		"ca_modulus":     bytesOf(ModulusBytes(in.CAModulus)),
+		"ca_redc":        limbsOf(proto.RedcParam(in.CAModulus)),
+		"cert_sig":       bytesOf(in.CertSig),
+		"user_redc":      limbsOf(proto.RedcParam(in.UserModulus)),
+		"nonce_sig":      bytesOf(in.NonceSig),
+	})
 }
 
 // ProverTOML renders the inputs in nargo's Prover.toml format.

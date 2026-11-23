@@ -20,3 +20,10 @@ xcuserdata/
 # these patterns are only a last line of defence.
 *.der
 /real/
+
+# On-device prover: fetched/built artifacts and local signing settings.
+/prover/target/
+/prover/vendor/
+/ios/ShojiProverKit/ShojiProverFFI.xcframework/
+/ios/App/ProverResources/
+/ios/Local.xcconfig

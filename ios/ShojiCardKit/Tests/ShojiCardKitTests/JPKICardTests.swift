@@ -159,6 +159,18 @@ struct JPKICardTests {
         #expect(card.verifyCommandsWithData == 1)
     }
 
+    @Test func testReadsCertificateAndSignsWithOnePasswordVerification() async throws {
+        let card = makeCard()
+        let jpki = JPKICard(transport: card)
+        try await jpki.selectApplication()
+        let challenge = try Challenge(testChallenge)
+        let (certificate, signature) = try await jpki.readSignCertificateAndSign(challenge, password: "ABC123")
+        #expect(certificate == fakeCertificate(bodyLength: 1738, fill: 0xAA))
+        #expect(signature.count == 256)
+        #expect(card.signedData == [challenge.digestInfo])
+        #expect(card.verifyCommandsWithData == 1)
+    }
+
     @Test func testDoesNotSignWithWrongPasswordOrFewAttempts() async throws {
         let challenge = try Challenge(testChallenge)
 

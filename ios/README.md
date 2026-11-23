@@ -2,10 +2,11 @@
 
 A development tool, not a product: it reads the JPKI certificates from a real
 My Number Card so that their **structure** can be compared with the mock
-certificates, using `cmd/certinspect` on your own Mac, and can have the card
-sign a verifier's challenge so that a proof can be generated on the Mac. It does
-not generate proofs itself, has no network code, and keeps nothing after it
-leaves the foreground.
+certificates, using `cmd/certinspect` on your own Mac, and it can make a full
+proof on the phone: read the card, have it sign a verifier's challenge and
+generate the proof, so that only the proof and the nullifier leave the device.
+It has no network code (a Mac relays the request and the proof over the cable)
+and keeps no certificate after it leaves the foreground.
 
 > [!CAUTION]
 > - The signing password (6-16 letters and digits) **locks after 5 consecutive
@@ -22,9 +23,11 @@ leaves the foreground.
 ## Layout
 
 ```
-ShojiCardKit/   card commands and safety rules, no CoreNFC dependency (Swift package with tests)
-App/            SwiftUI app and the CoreNFC transport
-project.yml     XcodeGen spec for the Xcode project
+ShojiCardKit/    card commands and safety rules, no CoreNFC dependency (Swift package with tests)
+ShojiProverKit/  Swift wrapper around the in-process prover in ../prover
+App/             SwiftUI app and the CoreNFC transport
+scripts/         prepare-resources.sh: circuit, verification key and reference string for the app
+project.yml      XcodeGen spec for the Xcode project
 ```
 
 ## Requirements
@@ -33,18 +36,25 @@ project.yml     XcodeGen spec for the Xcode project
 - An iPhone with NFC, and an Apple developer team that can sign apps using the
   *NFC Tag Reading* capability
 - [XcodeGen](https://github.com/yonaskolb/XcodeGen): `brew install xcodegen`
+- A Rust toolchain with the iOS targets, for the prover:
+  `rustup target add aarch64-apple-ios aarch64-apple-ios-sim`
 
 ## Build and install
 
 ```sh
+make circuit                              # in the repository root
+prover/scripts/build-apple.sh             # builds ios/ShojiProverKit/ShojiProverFFI.xcframework
+ios/scripts/prepare-resources.sh          # fills ios/App/ProverResources/
+
 cd ios
-(cd ShojiCardKit && swift test)   # card-command logic against a fake card
+(cd ShojiCardKit && swift test)           # card-command logic against a fake card
+cp Local.xcconfig.example Local.xcconfig  # then set your team identifier in it
 xcodegen generate
 open ShojiProbe.xcodeproj
 ```
 
-In Xcode: select the *ShojiProbe* target, choose your team under *Signing &
-Capabilities*, connect the iPhone and run.
+Connect the iPhone and run. `Local.xcconfig` keeps your team identifier out of
+the repository and across `xcodegen generate`.
 
 ## Use
 
@@ -88,4 +98,29 @@ Capabilities*, connect the iPhone and run.
    shoji's own nonce message, rebuilt from the challenge; it cannot be made to
    sign an arbitrary digest. Pasting the challenge and copying the signature
    through the clipboard also works where Universal Clipboard does.
-5. Delete the files when done, and use *erase* in the app.
+5. **Prove on the device.** This is the intended design: the certificate never
+   leaves the phone.
+
+   ```sh
+   go run ./cmd/cardclient challenge -state ~/jpki-real/challenge.json -request ~/jpki-real/request.json
+   xcrun devicectl device copy to --device <device> \
+       --domain-type appDataContainer --domain-identifier io.github.keitaj.shoji.probe \
+       --source ~/jpki-real/request.json --destination Documents/request.json
+   ```
+
+   In the app: read the retry counter (step 1), enter the signing password, then
+   "prove with the card". One tap reads the certificate and signs; the proof is
+   generated on the phone. Collect the result, which holds only the nonce, the
+   CA key hash, the nullifier and the proof, and relay it:
+
+   ```sh
+   xcrun devicectl device copy from --device <device> \
+       --domain-type appDataContainer --domain-identifier io.github.keitaj.shoji.probe \
+       --source Documents/submission.json --destination ~/jpki-real/submission.json
+   go run ./cmd/cardclient submit -state ~/jpki-real/challenge.json -submission ~/jpki-real/submission.json
+   ```
+
+   With this flow, steps 2 to 4 (exporting the certificate, proving on the Mac)
+   are not needed.
+6. **Benchmark** on-device proving with the bundled mock inputs (no card involved).
+7. Use *erase* at the bottom of the app when done, and delete any exported files.

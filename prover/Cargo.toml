@@ -1,0 +1,31 @@
+[package]
+name = "shoji-prover"
+version = "0.1.0"
+edition = "2021"
+license = "Apache-2.0"
+description = "Generates shoji proofs in-process (for phones): Noir witness generation + Barretenberg proving"
+publish = false
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+# Only first-party crates of the toolchain shoji already uses, pinned to the same
+# versions as the CLI tools (nargo 1.0.0, bb 6.0.0):
+#   - barretenberg-rs: Aztec's official Rust bindings for Barretenberg
+#   - acvm / nargo / noirc_abi / bn254_blackbox_solver: the Noir repository
+[dependencies]
+barretenberg-rs = { version = "=6.0.0", default-features = false, features = ["ffi"] }
+acvm = { git = "https://github.com/noir-lang/noir.git", tag = "v1.0.0", package = "acvm" }
+bn254_blackbox_solver = { git = "https://github.com/noir-lang/noir.git", tag = "v1.0.0", package = "bn254_blackbox_solver" }
+nargo = { git = "https://github.com/noir-lang/noir.git", tag = "v1.0.0", package = "nargo" }
+noirc_abi = { git = "https://github.com/noir-lang/noir.git", tag = "v1.0.0", package = "noirc_abi" }
+base64 = "0.22"
+# Big-integer division for the Barrett hints. Already part of the Noir crates'
+# own dependency tree; pinned to the version they resolve to.
+num-bigint = "=0.4.8"
+flate2 = "1"
+serde_json = "1"
+
+[profile.release]
+lto = true
+panic = "abort"

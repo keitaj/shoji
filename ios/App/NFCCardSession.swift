@@ -33,6 +33,9 @@ final class NFCCardSession: NSObject, NFCTagReaderSessionDelegate {
         case signCertificate(password: String)
         /// Verifies the signing password (once) and has the card sign the challenge's nonce message.
         case sign(challenge: Challenge, password: String)
+        /// Verifies the signing password (once), reads the signing certificate and has the
+        /// card sign the challenge: everything on-device proving needs.
+        case certificateAndSignature(challenge: Challenge, password: String)
     }
 
     struct Output {
@@ -97,6 +100,10 @@ final class NFCCardSession: NSObject, NFCTagReaderSessionDelegate {
                     out.signCertificate = try await card.readSignCertificate(password: password)
                 case .sign(let challenge, let password):
                     out.signature = try await card.sign(challenge, password: password)
+                case .certificateAndSignature(let challenge, let password):
+                    let (certificate, signature) = try await card.readSignCertificateAndSign(challenge, password: password)
+                    out.signCertificate = certificate
+                    out.signature = signature
                 }
 
                 session.alertMessage = "読み取りが完了しました"

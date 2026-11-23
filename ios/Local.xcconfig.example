@@ -1,0 +1,3 @@
+// Copy to Local.xcconfig (which is ignored by git) and set your Apple developer
+// team identifier, so that it survives `xcodegen generate`.
+DEVELOPMENT_TEAM = XXXXXXXXXX

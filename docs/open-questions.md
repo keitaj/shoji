@@ -57,14 +57,16 @@ contents — use the "Certificate structure" issue template).
 | Keys and signature algorithm | holder and CA keys RSA-2048 with e = 65537; sha256WithRSAEncryption | matches |
 | CA hierarchy | the CA certificate on the card is self-signed and directly verifies the holder certificate | matches the single-level assumption |
 
-With that card, a full proof was made and accepted by a verifier that trusts only the card's signing CA
-(2026-11-23; reading and signing on an iPhone with `ios/`, proving on a PC with `cmd/cardclient`).
+With that card, full proofs were made and accepted by a verifier that trusts only the card's signing CA
+(2026-11-23): first proving on a PC with `cmd/cardclient`, then proving on the iPhone itself with `prover/`,
+so that only the proof and the nullifier left the phone.
 
 ## Card signing behaviour (needed for the card reader app)
 
 - The commands for selecting the application, reading the certificates, reading the PIN retry counter,
   verifying the PIN and signing (SHA-256 DigestInfo in, PKCS#1 v1.5 signature out) all worked on a real
   card as the open-source implementations describe, and the resulting signature verifies in the circuit.
+  One PIN verification was enough to both read the signing certificate and sign, in the same session.
   There is still no official specification to check them against.
 - A signature made with the signing certificate can carry legal effect. Whether
   it is appropriate to have users sign a nonce for identity verification, and

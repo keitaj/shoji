@@ -3,9 +3,14 @@ name: ShojiProbe
 options:
   deploymentTarget:
     iOS: "16.0"
+configFiles:
+  Debug: Local.xcconfig
+  Release: Local.xcconfig
 packages:
   ShojiCardKit:
     path: ShojiCardKit
+  ShojiProverKit:
+    path: ShojiProverKit
 targets:
   ShojiProbe:
     type: application
@@ -15,8 +20,15 @@ targets:
         excludes:
           - Info.plist
           - ShojiProbe.entitlements
+          - ProverResources
+      # Circuit, verification key, reference string and benchmark inputs, copied
+      # into the app as a folder. Created by scripts/prepare-resources.sh.
+      - path: App/ProverResources
+        type: folder
+        buildPhase: resources
     dependencies:
       - package: ShojiCardKit
+      - package: ShojiProverKit
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: io.github.keitaj.shoji.probe

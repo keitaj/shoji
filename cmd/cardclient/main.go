@@ -7,6 +7,13 @@
 //	cardclient prove -state ~/jpki-real/challenge.json \
 //	    -cert ~/jpki-real/jpki_sign.der -ca ~/jpki-real/jpki_sign_ca.der -sig <hex>
 //
+// When the phone generates the proof itself, the certificate never reaches this
+// machine; it only relays a request to the phone and the phone's answer back:
+//
+//	cardclient challenge -state challenge.json -request request.json
+//	    -> hand request.json to the phone; it returns submission.json
+//	cardclient submit -state challenge.json -submission submission.json
+//
 // Keep the certificate and the state file outside the repository. Nothing in
 // them is printed.
 package main
@@ -46,6 +53,8 @@ func main() {
 		challenge(os.Args[2:])
 	case "prove":
 		prove(os.Args[2:])
+	case "submit":
+		submit(os.Args[2:])
 	default:
 		log.Fatalf("unknown subcommand %q", os.Args[1])
 	}
@@ -56,6 +65,7 @@ func challenge(args []string) {
 	server := fs.String("server", "http://127.0.0.1:8080", "verifier base URL")
 	app := fs.String("app", "demo", "application identifier")
 	statePath := fs.String("state", "", "file to remember the challenge in (outside the repository)")
+	requestPath := fs.String("request", "", "also write a request file for a phone that proves on-device")
 	fs.Parse(args)
 	if *statePath == "" {
 		log.Fatal("challenge: -state is required")
@@ -73,8 +83,63 @@ func challenge(args []string) {
 	if err1 != nil || err2 != nil {
 		log.Fatal("verifier returned a malformed challenge")
 	}
+	if *requestPath != "" {
+		// The phone cannot compute the CA key hash itself; with a single trusted CA
+		// there is nothing to choose.
+		if len(ch.TrustedCAHashes) != 1 {
+			log.Fatalf("the verifier trusts %d CAs; choosing between them is not implemented", len(ch.TrustedCAHashes))
+		}
+		req, _ := json.Marshal(map[string]any{
+			"challenge":      proto.ChallengeString(appID, nonce),
+			"current_date":   ch.CurrentDate,
+			"age_threshold":  ch.AgeThreshold,
+			"ca_pubkey_hash": ch.TrustedCAHashes[0],
+		})
+		if err := os.WriteFile(*requestPath, req, 0o600); err != nil {
+			log.Fatal(err)
+		}
+		fmt.Fprintf(os.Stderr, "challenge valid for %d seconds; request written to %s\n", ch.ExpiresIn, *requestPath)
+		return
+	}
 	fmt.Fprintf(os.Stderr, "challenge valid for %d seconds; have the card sign this string:\n", ch.ExpiresIn)
 	fmt.Println(proto.ChallengeString(appID, nonce))
+}
+
+// submit relays a proof generated on the phone to the verifier. The submission
+// holds only what the verifier is meant to see: nonce, CA key hash, nullifier, proof.
+func submit(args []string) {
+	fs := flag.NewFlagSet("submit", flag.ExitOnError)
+	statePath := fs.String("state", "", "state file written by `cardclient challenge`")
+	subPath := fs.String("submission", "", "submission file produced by the phone")
+	fs.Parse(args)
+	if *statePath == "" || *subPath == "" {
+		log.Fatal("submit: -state and -submission are required")
+	}
+	raw, err := os.ReadFile(*statePath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	var st state
+	if err := json.Unmarshal(raw, &st); err != nil {
+		log.Fatal("unreadable state file")
+	}
+	raw, err = os.ReadFile(*subPath)
+	if err != nil {
+		log.Fatal(err)
+	}
+	var req verifier.VerifyRequest
+	if err := json.Unmarshal(raw, &req); err != nil {
+		log.Fatal("unreadable submission file")
+	}
+	if req.Nonce != st.Challenge.Nonce {
+		log.Fatal("the submission answers a different challenge")
+	}
+	_, res, err := client.Submit(context.Background(), &http.Client{Timeout: time.Minute}, st.Server, &req)
+	if err != nil {
+		log.Fatalf("rejected: %v", err)
+	}
+	_ = os.Remove(*statePath)
+	fmt.Printf("accepted: nullifier=%s new=%v\n", res.Nullifier, res.New)
 }
 
 func prove(args []string) {

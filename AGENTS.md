@@ -22,8 +22,11 @@ that the user is "a real person aged 18 or over", together with a "per-applicati
 - Verification server: Go 1.27. For now proofs are verified by calling `bb verify` as a subprocess.
   Storage is SQLite
 - Test certificate generation: Go (crypto/x509)
-- Card reading: `ios/` is a development tool (Swift, CoreNFC) that reads the certificates from a real card
-  and has the card sign a challenge. Proving still happens on a PC (`cmd/cardclient`)
+- On-device proving: `prover/` (Rust) runs Noir witness generation and Barretenberg proving in-process. It
+  depends only on the official crates (acvm/nargo/noirc_abi at Noir v1.0.0, barretenberg-rs 6.0.0); do not
+  add third-party proving wrappers or prebuilt binaries from other sources
+- Card reading: `ios/` is a development tool (Swift, CoreNFC) that reads a real card, has it sign a
+  challenge and proves on the device. It has no network code; a Mac relays the proof (`cmd/cardclient`)
 
 The authoritative versions are in README.md, `circuits/Nargo.toml` and `go.mod`.
 
@@ -73,7 +76,8 @@ internal/proto/     values the circuit and Go must agree on (message format, has
 internal/           the other Go packages (mockjpki, witness, prover, verifier, client)
 testdata/           mock certificates and keys (generated, not in git; never put real personal data here)
 docs/               threat model, open questions, benchmarks (English is authoritative; Japanese in docs/ja/)
-ios/                development tool that reads a real card and has it sign a challenge (iPhone)
+prover/             Rust library that generates proofs in-process, for phones
+ios/                development tool that reads a real card and proves on the device (iPhone)
 ```
 
 ## What is implemented (without a real card)
@@ -105,7 +109,8 @@ card's certificate.
   thing changed.
 - Do not take positions, offsets or selectors as witness inputs. Do not write `unconstrained` code of our own.
 - When changing a public input, a public output, the signed message or a hash, update `internal/proto`
-  and the verification server to match, and regenerate the verification key.
+  and the verification server to match, and regenerate the verification key. The inputs are also
+  assembled in `prover/src/inputs.rs`; keep it in step with `internal/witness` (a test compares them).
 - Update docs/threat-model.md when the set of attacks or guarantees changes. When changing an English
   document under docs/, update docs/ja/ as well.
 - The rules for external contributors are in CONTRIBUTING.md.
@@ -115,9 +120,10 @@ card's certificate.
 - A reader app that selects the JPKI AP, reads the signing certificate and, after PIN entry, has the
   card sign the nonce. Confirm APDUs and the file layout from existing open-source implementations and
   official documentation before implementing (do not write them from guesses).
-- A full proof with one real card has been made and accepted (card reading and signing on an iPhone,
-  proving on a PC). What remains is doing the proving on the device.
-- On-device proof generation (time and memory decide whether this is viable as a business).
+- A full proof with one real card has been made on an iPhone (reading, signing and proving on the device)
+  and accepted. What remains is an app for end users (talking to the verifier itself).
+- On-device proving on other phones: measured only on an iPhone 15 Pro (about 1.8 s, 506 MiB). Low-memory
+  phones and Android are untested (time and memory decide whether this is viable as a business).
 - Revocation checking falls under the accreditation scheme for public personal authentication and is
   not handled in the PoC.
 

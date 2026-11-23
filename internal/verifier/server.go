@@ -90,9 +90,11 @@ type Config struct {
 type Server struct {
 	cfg     Config
 	trusted map[string]bool
-	apps    map[string]bool
-	sem     chan struct{}
-	mux     *http.ServeMux
+	// trustedList is the same set in configuration order, for the challenge response.
+	trustedList []string
+	apps        map[string]bool
+	sem         chan struct{}
+	mux         *http.ServeMux
 }
 
 func NewServer(cfg Config) (*Server, error) {
@@ -123,6 +125,9 @@ func NewServer(cfg Config) (*Server, error) {
 		if err != nil {
 			return nil, err
 		}
+		if !s.trusted[proto.FieldHex(x)] {
+			s.trustedList = append(s.trustedList, proto.FieldHex(x))
+		}
 		s.trusted[proto.FieldHex(x)] = true
 	}
 	for _, a := range cfg.Apps {
@@ -149,6 +154,10 @@ type ChallengeResponse struct {
 	CurrentDate  uint32 `json:"current_date"`
 	AgeThreshold uint8  `json:"age_threshold"`
 	ExpiresIn    int    `json:"expires_in"` // seconds
+	// TrustedCAHashes lists the ca_pubkey_hash values the server accepts, so a
+	// holder that cannot compute the hash itself can pick the one for its CA.
+	// It is public configuration; the server still checks the value it gets back.
+	TrustedCAHashes []string `json:"trusted_ca_hashes"`
 }
 
 func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
@@ -179,11 +188,12 @@ func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, ChallengeResponse{
-		Nonce:        proto.FieldHex(new(big.Int).SetBytes(nonce)),
-		AppID:        proto.FieldHex(proto.AppID(req.App)),
-		CurrentDate:  c.CurrentDate,
-		AgeThreshold: c.AgeThreshold,
-		ExpiresIn:    int(s.cfg.NonceTTL / time.Second),
+		Nonce:           proto.FieldHex(new(big.Int).SetBytes(nonce)),
+		AppID:           proto.FieldHex(proto.AppID(req.App)),
+		CurrentDate:     c.CurrentDate,
+		AgeThreshold:    c.AgeThreshold,
+		ExpiresIn:       int(s.cfg.NonceTTL / time.Second),
+		TrustedCAHashes: s.trustedList,
 	})
 }
 

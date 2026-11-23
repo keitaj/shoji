@@ -18,12 +18,13 @@ personal data ever leaving their device.
 
 > [!WARNING]
 > **Status: proof of concept. Not for production.**
-> It has been run end to end with one real card: the card signed a challenge, and
-> the proof was accepted by a verifier trusting only the real signing CA. In that
-> run the proof was generated on a PC, not on the phone, so the certificate did
-> leave the device. Day-to-day development uses a mock CA. The circuit and its
-> dependencies are unaudited, and certificate expiry and revocation are not
-> checked (see [open questions](docs/open-questions.md)).
+> It has been run end to end with one real card and one iPhone: the card was read
+> and signed a challenge, the proof was generated on the phone, and a verifier
+> trusting only the real signing CA accepted it. Only the proof and the nullifier
+> left the phone. This was done with a development tool, not an app for end
+> users. Day-to-day development uses a mock CA. The circuit and its dependencies
+> are unaudited, and certificate expiry and revocation are not checked (see
+> [open questions](docs/open-questions.md)).
 
 ## What it proves
 
@@ -105,6 +106,10 @@ mkdir -p ~/.bb && tar -xzf barretenberg-arm64-darwin.tar.gz -C ~/.bb
 The Makefile and the Go code look in `~/.nargo/bin` and `~/.bb` when the tools
 are not on `PATH`.
 
+The on-device prover and the iOS tool additionally need Xcode and a Rust
+toolchain; see [`ios/README.md`](ios/README.md). They are not needed for the
+circuit, the verifier or the tests above.
+
 ### Build and test
 
 ```sh
@@ -135,9 +140,9 @@ with any date of birth. Never expose a verifier that trusts `testdata/ca.pem`.
 
 ## Performance
 
-On an Apple M5 laptop: about 222k gates, **~0.8 s** to prove with a 585 MiB
-peak, ~10 ms to verify, 14.7 KB proofs. On-device proving has not been measured
-yet. Details: [docs/bench.md](docs/bench.md).
+About 222k gates and 14.7 KB proofs. Proving takes **~0.8 s** on an Apple M5
+laptop (585 MiB peak) and **~1.8 s** on an iPhone 15 Pro (506 MiB peak);
+verifying takes ~10 ms. Details: [docs/bench.md](docs/bench.md).
 
 ## Repository layout
 
@@ -156,7 +161,8 @@ internal/prover/    runs noir-execute and bb prove
 internal/verifier/  server and SQLite store
 internal/client/    holder side of the protocol
 docs/               threat model, open questions, benchmarks
-ios/                development tool that reads a real card and has it sign a challenge (iPhone)
+prover/             Rust library that generates proofs in-process, for phones (official Noir and Barretenberg crates only)
+ios/                development tool that reads a real card and proves on the device (iPhone)
 ```
 
 ## Documentation
@@ -171,15 +177,16 @@ documents are authoritative.
 ## Roadmap
 
 Working today: the circuit, a mock CA, the verification server, negative tests
-and PC benchmarks. With one real card, a full proof has been made and accepted
-(card reading and signing on an iPhone, proving on a PC).
+and PC benchmarks. With one real card, a full proof has been made on an iPhone
+(card reading, signing and proving all on the device) and accepted.
 
 Not implemented yet:
 
-- On-device proving. Until then the certificate has to be moved to a PC to make
-  a proof, which is not the intended design. (`ios/` is a development tool that
-  reads the certificates and has the card sign a challenge; it does not prove.)
-- A reader app for end users.
+- A reader app for end users. `ios/` is a development tool: it has no network
+  code, and the proof is relayed to the verifier by a Mac over the cable.
+- Computing the CA key hash on the phone (the verifier's list is relayed to it),
+  which matters once more than one CA key is trusted.
+- Android, and phones with less memory than the one tested.
 - Checking certificate expiry.
 
 Revocation checking falls under Japan's accreditation scheme for public personal

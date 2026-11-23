@@ -1,0 +1,4 @@
+module ShojiProverFFI {
+    header "shoji_prover.h"
+    export *
+}
