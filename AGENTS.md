@@ -71,6 +71,7 @@ circuits/           Noir circuit (src/main.nr, cert.nr, der.nr, tests.nr)
 cmd/mockca/         test CA and tool that issues certificates shaped like JPKI signing certificates
 cmd/genfixtures/    generates testdata/ and the circuit test fixtures (circuits/src/fixtures.nr)
 cmd/certinspect/    prints a certificate's structure without its contents; checks it against the circuit
+cmd/sodinspect/     reports how an electronic passport is signed, without its contents (see docs/passport.md)
 cmd/verifier/       verification server (nonce issuance, proof verification, nullifier storage, `ban` subcommand)
 cmd/mockclient/     stand-in for the holder (signs with a mock key instead of a card)
 cmd/cardclient/     holder for a real card (gets a challenge, then proves with the card's signature)

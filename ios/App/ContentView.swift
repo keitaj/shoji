@@ -118,6 +118,10 @@ struct ContentView: View {
                     Section("結果") { Text(message) }
                 }
 
+                Section("パスポート") {
+                    NavigationLink("パスポートの構造確認") { PassportProbeView() }
+                }
+
                 // Always available, whatever state the app is in.
                 Section("データの消去") {
                     Text("アプリ内に残っているもの（読み取った証明書、署名、Mac との受け渡し用ファイル、計測結果）をすべて消します。")
@@ -362,6 +366,7 @@ struct ContentView: View {
         if !keepHandOffFiles {
             proveReport = ""
             benchReport = ""
+            try? FileManager.default.removeItem(at: Self.documents.appendingPathComponent("passport"))
             for name in ["bench.txt", "bench_proof", "bench_public_inputs"] {
                 try? FileManager.default.removeItem(at: Self.documents.appendingPathComponent(name))
             }

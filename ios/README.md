@@ -10,8 +10,8 @@ Two things in one app:
 - **Developer tools** (button at the top right): read the JPKI certificates from
   a real card so that their **structure** can be compared with the mock
   certificates using `cmd/certinspect`, sign a challenge for a proof made on a
-  Mac, prove on the device from a request relayed over the cable, and benchmark
-  on-device proving.
+  Mac, prove on the device from a request relayed over the cable, benchmark
+  on-device proving, and read how an electronic passport is signed.
 
 The app's only network code is `App/VerifierClient.swift`: two requests to the
 origin named by the link. It keeps no certificate after a verification.
@@ -143,4 +143,11 @@ the local network.
    With this flow, steps 2 to 4 (exporting the certificate, proving on the Mac)
    are not needed.
 6. **Benchmark** on-device proving with the bundled mock inputs (no card involved).
-7. Use *erase* at the bottom of the app when done, and delete any exported files.
+7. **Passport structure.** Enter the document number, date of birth and date of
+   expiry from the data page and tap the passport. The tool reads the security
+   object, the chip's public key, the security infos and one Active
+   Authentication signature, not the photo or the data group with the name.
+   Collect the `passport` folder over the cable and run
+   `go run ./cmd/sodinspect -dir <folder>`; see [docs/passport.md](../docs/passport.md).
+   A wrong entry does not lock the chip.
+8. Use *erase* at the bottom of the app when done, and delete any exported files.

@@ -114,6 +114,7 @@ circuits/          Noir回路とテスト（fixtures.nr は生成物、git管理
 cmd/mockca/        モックCA（init / issue / hash）
 cmd/genfixtures/   testdata と回路テスト用フィクスチャの生成
 cmd/certinspect/   証明書の中身を出さずに構造だけを表示し、回路の想定と照合する
+cmd/sodinspect/    IC 旅券の署名の構造を、中身を出さずに表示する
 cmd/verifier/      検証サーバ（/challenge, /verify, ban サブコマンド）
 cmd/mockclient/    利用者役（カードの代わりにモック鍵で署名）
 cmd/cardclient/    実カード用の利用者役（チャレンジを取得し、カードの署名で証明を作る）
@@ -133,6 +134,7 @@ ios/               iOS アプリ（QR コードからの確認、実カード、
 - [脅威モデル](docs/ja/threat-model.md)
 - [未確認事項](docs/ja/open-questions.md)
 - [ベンチマーク](docs/bench.md)（英語）
+- [パスポート](docs/ja/passport.md): 日本のパスポートで同じことができるかの調査（回路は未実装）
 
 ## 性能
 

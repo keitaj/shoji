@@ -181,6 +181,7 @@ circuits/           Noir circuit and its tests
 cmd/mockca/         mock CA (init / issue / hash)
 cmd/genfixtures/    generates testdata/ and the circuit test fixtures
 cmd/certinspect/    prints a certificate's structure without its contents; checks it against the circuit
+cmd/sodinspect/     reports how an electronic passport is signed, without its contents
 cmd/verifier/       verification server (/challenge, /verify, `ban` subcommand)
 cmd/mockclient/     stand-in for the holder: signs with a mock key instead of a card
 cmd/cardclient/     holder for a real card: gets a challenge, then proves with the card's signature
@@ -200,8 +201,9 @@ ios/                iOS app: verification from a QR code with a real card, provi
 - [Threat model](docs/threat-model.md): what is protected, attacks and the tests covering them, known limitations
 - [Open questions](docs/open-questions.md): everything not yet confirmed against a real card, and open design decisions
 - [Benchmarks](docs/bench.md)
+- [Passports](docs/passport.md): an investigation into doing the same from a Japanese passport (no circuit yet)
 
-Japanese versions of the first two are in [`docs/ja/`](docs/ja). The English
+Japanese versions are in [`docs/ja/`](docs/ja) (all but the benchmarks). The English
 documents are authoritative.
 
 ## Roadmap
