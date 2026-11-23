@@ -2,9 +2,11 @@
 // certificates (署名用電子証明書): RSA-2048, sha256WithRSAEncryption, with the
 // four basic attributes carried as otherName entries in subjectAltName.
 //
-// UNCONFIRMED: the OIDs, the string types and the date format below have not
-// been checked against a real card. See docs/open-questions.md. Never put a
-// real person's data through this package.
+// The otherName OIDs, the UTF8String wrapping, the nine-digit date of birth and
+// the order of the entries follow what was observed on a real card (structure
+// only; see docs/open-questions.md). The encodings of gender and of the
+// "substitute character" entries are still placeholders. Never put a real
+// person's data through this package.
 package mockjpki
 
 import (
@@ -21,7 +23,7 @@ import (
 	"time"
 )
 
-// Provisional otherName type OIDs (unconfirmed, see docs/open-questions.md).
+// otherName type OIDs of the basic attributes.
 var (
 	OIDName              = asn1.ObjectIdentifier{1, 2, 392, 200149, 8, 5, 5, 1}
 	OIDNameSubstitute    = asn1.ObjectIdentifier{1, 2, 392, 200149, 8, 5, 5, 2}
@@ -38,7 +40,7 @@ var (
 type Holder struct {
 	Name        string
 	Gender      string // provisional encoding: "1" male, "2" female
-	DateOfBirth string // provisional encoding: YYYYMMDD
+	DateOfBirth string // Gregorian YYYYMMDD; encoded with a leading era digit, see DateOfBirthValue
 	// Address is raw bytes so tests can embed hostile content (e.g. bytes that
 	// imitate a date-of-birth otherName) in an attribute.
 	Address []byte
@@ -94,9 +96,10 @@ func (ca *CA) Issue(h Holder) (*x509.Certificate, *rsa.PrivateKey, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	// A policy extension is included only so that the certificate carries
-	// several extensions in front of subjectAltName, as a real one would.
-	policies, err := asn1.Marshal([]struct{ ID asn1.ObjectIdentifier }{{asn1.ObjectIdentifier{1, 2, 392, 200149, 8, 5, 1, 1, 10}}})
+	// A real certificate carries a critical certificatePolicies extension with the
+	// signing CA's policy identifier; the mock does too, so that the circuit's
+	// extension walk meets a critical flag on an extension other than subjectAltName.
+	policies, err := asn1.Marshal([]struct{ ID asn1.ObjectIdentifier }{{asn1.ObjectIdentifier{1, 2, 392, 200149, 8, 5, 1, 1, 20}}})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -112,8 +115,8 @@ func (ca *CA) Issue(h Holder) (*x509.Certificate, *rsa.PrivateKey, error) {
 		KeyUsage:           x509.KeyUsageDigitalSignature | x509.KeyUsageContentCommitment,
 		SignatureAlgorithm: x509.SHA256WithRSA,
 		ExtraExtensions: []pkix.Extension{
-			{Id: oidCertPolicies, Value: policies},
 			{Id: oidSubjectAltName, Value: san},
+			{Id: oidCertPolicies, Critical: true, Value: policies},
 		},
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, ca.Cert, &key.PublicKey, ca.Key)
@@ -125,6 +128,24 @@ func (ca *CA) Issue(h Holder) (*x509.Certificate, *rsa.PrivateKey, error) {
 		return nil, nil, err
 	}
 	return cert, key, nil
+}
+
+// DateOfBirthValue encodes a Gregorian YYYYMMDD date the way the certificate
+// stores it: a Japanese era code (1 Meiji, 2 Taisho, 3 Showa, 4 Heisei, 5 Reiwa)
+// followed by the same eight digits.
+func DateOfBirthValue(yyyymmdd string) string {
+	era := "1"
+	switch {
+	case yyyymmdd >= "20190501":
+		era = "5"
+	case yyyymmdd >= "19890108":
+		era = "4"
+	case yyyymmdd >= "19261225":
+		era = "3"
+	case yyyymmdd >= "19120730":
+		era = "2"
+	}
+	return era + yyyymmdd
 }
 
 // OtherName returns the DER of a GeneralName otherName:
@@ -150,12 +171,13 @@ func subjectAltName(h Holder) ([]byte, error) {
 		oid asn1.ObjectIdentifier
 		val []byte
 	}{
+		// Same order as on a real card.
 		{OIDName, []byte(h.Name)},
-		{OIDNameSubstitute, []byte("0")},
+		{OIDDateOfBirth, []byte(DateOfBirthValue(h.DateOfBirth))},
 		{OIDGender, []byte(h.Gender)},
 		{OIDAddress, h.Address},
+		{OIDNameSubstitute, []byte("00000")},
 		{OIDAddressSubstitute, []byte("0")},
-		{OIDDateOfBirth, []byte(h.DateOfBirth)},
 	}
 	var body []byte
 	for _, e := range entries {

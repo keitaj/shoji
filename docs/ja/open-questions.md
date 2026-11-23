@@ -4,27 +4,58 @@
 
 推測で確定させないもの。実カード・公式資料・既存のオープンソース実装で確認できたら、根拠とともに更新する。
 
-## 証明書の構造（実カードと照合する）
+## 資料とオープンソース実装で確認できたこと
 
-| 項目 | 現在の仮置き | 影響する場所 |
+公式資料「署名用認証局 運用規程」（第2.1版、2021年9月1日。静岡県が公開している写しで確認）から:
+
+- CA鍵・利用者鍵とも RSA 2048ビット（6.1.5）。
+- カードには利用者の秘密鍵、署名用電子証明書、署名用CAの**自己署名証明書**が格納される（4.3.1.1、4.4.1.1）。
+  1段構成の仮定を裏づける。CAの自己署名証明書の有効期間は10年で、鍵更新のためのリンク証明書がある
+  （6.3.2.1、7.1）。検証者は複数のCA鍵を同時に信頼する前提が必要。
+- subjectAltName には `commonName`、`dateOfBirth`、`gender`、`address`、
+  `substituteCharacterOfCommonName`、`substituteCharacterOfAddress` が入る（3.1.2、4.3.1.1）。モックも同じ6項目。
+- 証明書プロファイル本体（OID、文字列型、生年月日の形式、拡張の一覧）は「技術仕様書」に委ねられており（7.1）、
+  公開されているものは見つかっていない。これらの点は実カードで確認した（下の表）。
+- 利用者のCRLはアクセス制限されている（2.4）。
+
+オープンソース実装（[jpki/myna](https://github.com/jpki/myna) の `55a90c2`、
+[tex2e 氏の解説](https://tex2e.github.io/blog/protocol/jpki-mynumbercard-with-apdu)）から。両者は一致しているが**公式資料ではない**:
+
+- JPKI アプリケーションの AID は `D3 92 F0 00 26 01 00 00 00 01`。
+- ファイル: 署名用電子証明書 `00 01`（署名用暗証番号の照合後のみ読める）、署名用CA証明書 `00 02`、
+  署名用秘密鍵 `00 1A`、署名用暗証番号 `00 1B`。
+- 署名: `80 2A 00 80` に SHA-256 の **DigestInfo** を渡す。カードが PKCS#1 v1.5 パディングを行い、RSA署名を返す。
+  回路が検証している形式と一致する。（署名コマンドは実カードではまだ試していない。選択・読み出し・残り回数の取得は実カードで動作した。）
+- 暗証番号の残り試行回数は、試行を消費せずに読める（ステータス `63 Cx`）。myna は署名用暗証番号を大文字に変換してから照合している。
+
+## 証明書の構造: 実カードで確認済み
+
+2026年11月23日に実カード**1枚**で確認した。`ios/`（読み取りアプリ）と、構造だけを表示する `cmd/certinspect` を使った。
+発行時期の違うカードでは異なる可能性がある。追加の報告を歓迎する（構造のみ。中身は絶対に載せない。
+issue テンプレート「Certificate structure」を使う）。
+
+| 項目 | 実カードで観測した内容 | コード側 |
 |---|---|---|
-| 4情報の otherName の OID | `1.2.392.200149.8.5.5.{1 氏名, 2 氏名代替文字, 3 性別, 4 生年月日, 5 住所, 6 住所代替文字}` | `internal/mockjpki`, `circuits/src/cert.nr` の `OID_DATE_OF_BIRTH` |
-| 生年月日の表現 | 西暦 `YYYYMMDD` の8桁数字。元号の接頭辞などが付く可能性は未確認 | `cert.nr`（長さ8・数字のみを要求） |
-| 生年月日の文字列型 | UTF8String（回路は PrintableString も受け付ける） | `cert.nr` |
-| otherName の value の包み方 | `[0] EXPLICIT` の中に文字列が1つ | `cert.nr` |
-| 性別の表現 | `"1"` / `"2"`（回路は読まない） | `internal/mockjpki` |
-| 拡張の種類・個数・順序 | モックは keyUsage / authorityKeyIdentifier / certificatePolicies / subjectAltName。回路はOIDで探すので順序には依存しないが、上限は12個 | `cert.nr` の `MAX_EXTENSIONS` |
-| subjectAltName の要素数 | 上限10個 | `cert.nr` の `MAX_GENERAL_NAMES` |
-| issuerUniqueID / subjectUniqueID | 無いものとして扱う（あれば回路は拒否する） | `cert.nr` |
-| subject / issuer の内容 | モックは適当な値。回路は読まない | `internal/mockjpki` |
-| TBSCertificate の長さ | 回路の上限は 2032 バイト（バッファ2048 − 余白16）。モックは約800バイト | `cert.nr` の `MAX_TBS_LEN` |
-| 鍵と署名アルゴリズム | 利用者鍵・CA鍵とも RSA-2048、e=65537、sha256WithRSAEncryption (PKCS#1 v1.5) | 回路全体 |
-| CAの階層 | CA鍵が利用者証明書に直接署名する1段構成を仮定。中間CAがあれば回路の拡張が必要 | `main.nr` |
+| otherName の OID | `1.2.392.200149.8.5.5.{1 氏名, 2 氏名代替文字, 3 性別, 4 生年月日, 5 住所, 6 住所代替文字}`。並びは 1, 4, 3, 5, 2, 6 | 一致（`internal/mockjpki`、`circuits/src/cert.nr` の `OID_DATE_OF_BIRTH`）。回路は並び順に依存しない |
+| otherName の value の包み方 | `[0] EXPLICIT` の中に UTF8String が1つ | 一致。回路は UTF8String のみ受け付ける |
+| 生年月日の形式 | **数字9桁**。先頭1桁のあとに西暦 `YYYYMMDD`。確認したカードでは、先頭の桁はその日付の元号コード（1 明治、2 大正、3 昭和、4 平成、5 令和）と一致した | 回路は9桁を要求し、先頭の桁は読み飛ばす。モックCAは元号コードを書く |
+| 性別 | 数字1桁 | 回路は読まない。モックの `"1"` / `"2"` は仮置き |
+| 代替文字の項目 | 氏名側は数字5桁、住所側はより長い文字列 | 回路は読まない。モックの値は仮置き |
+| 拡張 | 7個: keyUsage（critical）、subjectAltName、certificatePolicies（critical、ポリシー `1.2.392.200149.8.5.1.1.20`）、issuerAltName、cRLDistributionPoints、authorityKeyIdentifier、subjectKeyIdentifier | 回路は subjectAltName を OID で探す。上限は12個（`MAX_EXTENSIONS`） |
+| subjectAltName の要素 | 6個、すべて otherName | 回路の上限は10個（`MAX_GENERAL_NAMES`） |
+| issuerUniqueID / subjectUniqueID | 無い | あれば回路は拒否する |
+| subject | C、L が2つ、CN | 回路は読まない |
+| TBSCertificate の長さ | 確認したカードでは 1552 バイト。氏名・住所の長さで変わる | 回路の上限は 2032 バイト（`MAX_TBS_LEN` − 余白）。**最長の氏名・住所でも収まるかは未確認** |
+| 鍵と署名アルゴリズム | 利用者鍵・CA鍵とも RSA-2048、e=65537。sha256WithRSAEncryption | 一致 |
+| CAの階層 | カード内のCA証明書は自己署名で、利用者の証明書を直接検証できる | 1段構成の仮定と一致 |
+
+回路のパーサ（`parse_tbs`）は実物の TBSCertificate を受け付ける。実カードでの証明全体はまだ作っていない。
+カードに nonce へ署名させる必要がある（次の節）。
 
 ## カードの署名動作（読み取りアプリに必要）
 
-- 署名用APに渡すデータの形式（DigestInfo を渡してカードが PKCS#1 v1.5 パディングを行う、という理解は未確認）。
-- APDU、ファイル構成、暗証番号の扱い。既存のオープンソース実装と公式資料で確認してから実装する。
+- 署名コマンド。オープンソース実装では SHA-256 の DigestInfo を渡し、カードが PKCS#1 v1.5 パディングを行う（上記）。実カードではまだ試していない。
+- アプリケーションの選択、証明書の読み出し、暗証番号の残り回数の取得、暗証番号の照合は、オープンソース実装のとおりに実カードで動作した。照合できる公式仕様は依然として無い。
 - 署名用電子証明書による署名は法的効力を持ちうる。nonce への署名を「本人確認のための署名」として行わせてよいか、
   メッセージに含めるべき文言・ドメイン分離の妥当性は制度面の確認が必要。
 

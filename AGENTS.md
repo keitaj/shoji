@@ -22,7 +22,8 @@ that the user is "a real person aged 18 or over", together with a "per-applicati
 - Verification server: Go 1.27. For now proofs are verified by calling `bb verify` as a subprocess.
   Storage is SQLite
 - Test certificate generation: Go (crypto/x509)
-- Card reader app (not implemented yet): Android (Kotlin, IsoDep)
+- Card reading: `ios/` is a development tool (Swift, CoreNFC) that reads the certificates from a real card.
+  A reader app that signs and proves is not implemented yet
 
 The authoritative versions are in README.md, `circuits/Nargo.toml` and `go.mod`.
 
@@ -64,20 +65,22 @@ negative test that a proof cannot be produced when the value is falsified.
 circuits/           Noir circuit (src/main.nr, cert.nr, der.nr, tests.nr)
 cmd/mockca/         test CA and tool that issues certificates shaped like JPKI signing certificates
 cmd/genfixtures/    generates testdata/ and the circuit test fixtures (circuits/src/fixtures.nr)
+cmd/certinspect/    prints a certificate's structure without its contents; checks it against the circuit
 cmd/verifier/       verification server (nonce issuance, proof verification, nullifier storage, `ban` subcommand)
 cmd/mockclient/     stand-in for the holder (signs with a mock key instead of a card)
 internal/proto/     values the circuit and Go must agree on (message format, hashes, field encoding)
 internal/           the other Go packages (mockjpki, witness, prover, verifier, client)
 testdata/           mock certificates and keys (generated, not in git; never put real personal data here)
 docs/               threat model, open questions, benchmarks (English is authoritative; Japanese in docs/ja/)
+ios/                development tool that reads the certificates from a real card (iPhone)
 ```
 
 ## What is implemented (without a real card)
 
 1. Development environment: nargo and bb versions are pinned in the README.
 2. `cmd/mockca`: a mock CA issues RSA-2048 / SHA-256 certificates. As in a JPKI signing certificate, the
-   four basic attributes are stored as otherName entries in subjectAltName (the OIDs are placeholders
-   until confirmed on a real card, and are marked as unconfirmed in docs/open-questions.md).
+   four basic attributes are stored as otherName entries in subjectAltName. The OIDs and the nine-digit
+   date of birth (era digit + YYYYMMDD) follow what was observed on one real card (docs/open-questions.md).
 3. `circuits`: implements invariants 1-4 above. RSA, SHA-256 and Poseidon come from existing libraries;
    there is no hand-rolled cryptography. The circuit determines the positions of the public key and the
    date of birth by walking the DER of the TBS from the root.
@@ -108,10 +111,11 @@ card's certificate.
 
 ## Not implemented yet (notes)
 
-- An Android app that selects the JPKI AP, reads the signing certificate and, after PIN entry, has the
+- A reader app that selects the JPKI AP, reads the signing certificate and, after PIN entry, has the
   card sign the nonce. Confirm APDUs and the file layout from existing open-source implementations and
   official documentation before implementing (do not write them from guesses).
-- Check the differences between the mock and the structure of a real card's certificate, and align the circuit.
+- Have a real card sign the nonce and make a full proof with it. The certificate structure has been
+  checked against one real card (`ios/` reads the certificates, `cmd/certinspect` reports structure only).
 - On-device proof generation (time and memory decide whether this is viable as a business).
 - Revocation checking falls under the accreditation scheme for public personal authentication and is
   not handled in the PoC.

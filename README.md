@@ -18,8 +18,9 @@ personal data ever leaving their device.
 
 > [!WARNING]
 > **Status: proof of concept. Not for production.**
-> Everything runs against a mock CA. The structure of a real card's certificate
-> has not been verified yet (see [open questions](docs/open-questions.md)), the
+> Proofs have only been made with certificates from a mock CA. The certificate
+> structure has been checked against one real card, but no proof has been made
+> with a real card yet (see [open questions](docs/open-questions.md)). The
 > circuit and its dependencies are unaudited, and certificate expiry and
 > revocation are not checked.
 
@@ -143,6 +144,7 @@ yet. Details: [docs/bench.md](docs/bench.md).
 circuits/           Noir circuit and its tests
 cmd/mockca/         mock CA (init / issue / hash)
 cmd/genfixtures/    generates testdata/ and the circuit test fixtures
+cmd/certinspect/    prints a certificate's structure without its contents; checks it against the circuit
 cmd/verifier/       verification server (/challenge, /verify, `ban` subcommand)
 cmd/mockclient/     stand-in for the holder: signs with a mock key instead of a card
 internal/proto/     values the circuit and Go must agree on (message format, hashes, field encoding)
@@ -152,6 +154,7 @@ internal/prover/    runs noir-execute and bb prove
 internal/verifier/  server and SQLite store
 internal/client/    holder side of the protocol
 docs/               threat model, open questions, benchmarks
+ios/                development tool that reads the certificates from a real card (iPhone)
 ```
 
 ## Documentation
@@ -166,13 +169,14 @@ documents are authoritative.
 ## Roadmap
 
 Working today: the circuit, a mock CA, the verification server, negative tests
-and PC benchmarks. No real card is involved yet.
+and PC benchmarks. The certificate structure the circuit expects has been
+checked against one real card.
 
 Not implemented yet:
 
-- An Android app that reads the signing certificate over NFC and has the card
-  sign the nonce.
-- Aligning the circuit with the structure of a real certificate.
+- Having a real card sign the nonce and proving with it. (`ios/` contains a
+  development tool that reads the certificates from a card; it does not sign or
+  prove.)
 - On-device proving.
 - Checking certificate expiry.
 

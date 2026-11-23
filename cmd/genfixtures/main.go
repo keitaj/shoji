@@ -35,7 +35,7 @@ func main() {
 	flag.Parse()
 	log.SetFlags(0)
 
-	decoy, err := mockjpki.OtherName(mockjpki.OIDDateOfBirth, []byte("19700101"))
+	decoy, err := mockjpki.OtherName(mockjpki.OIDDateOfBirth, []byte(mockjpki.DateOfBirthValue("19700101")))
 	if err != nil {
 		log.Fatal(err)
 	}
@@ -112,9 +112,9 @@ func main() {
 		copy(padded, tbs)
 
 		modOff := bytes.Index(tbs, witness.ModulusBytes(n))
-		// The real date of birth is the last occurrence (the decoy sits earlier, in the address).
-		dobOff := bytes.LastIndex(tbs, []byte(s.holder.DateOfBirth))
-		if modOff < 0 || dobOff < 0 {
+		// Offset of the YYYYMMDD digits; the era digit sits one byte before it.
+		dobOff := bytes.Index(tbs, []byte(mockjpki.DateOfBirthValue(s.holder.DateOfBirth))) + 1
+		if modOff < 0 || dobOff < 1 {
 			log.Fatalf("%s: could not locate fixture offsets", s.name)
 		}
 		sig := func(a, nn *big.Int) string {
@@ -179,7 +179,10 @@ func loadOrIssue(dir string, s holderSpec, ca *mockjpki.CA) (*x509.Certificate, 
 	base := filepath.Join(dir, s.name)
 	cert, errC := mockjpki.ReadCertPEM(base + ".pem")
 	key, errK := mockjpki.ReadKeyPEM(base + ".key")
-	if errC == nil && errK == nil && cert.CheckSignatureFrom(ca.Cert) == nil {
+	// Reuse an existing certificate only if it is from this CA and still has the
+	// current encoding (certificates issued before a format change are replaced).
+	current := []byte(mockjpki.DateOfBirthValue(s.holder.DateOfBirth))
+	if errC == nil && errK == nil && cert.CheckSignatureFrom(ca.Cert) == nil && bytes.Contains(cert.RawTBSCertificate, current) {
 		return cert, key
 	}
 	cert, key, err := ca.Issue(s.holder)

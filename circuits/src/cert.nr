@@ -29,8 +29,8 @@ global SPKI_SUFFIX: [u8; 5] = [0x02, 0x03, 0x01, 0x00, 0x01];
 
 // id-ce-subjectAltName 2.5.29.17
 global OID_SUBJECT_ALT_NAME: [u8; 3] = [0x55, 0x1d, 0x11];
-// Date-of-birth otherName type 1.2.392.200149.8.5.5.4
-// UNCONFIRMED against a real card: see docs/open-questions.md.
+// Date-of-birth otherName type 1.2.392.200149.8.5.5.4 (confirmed on a real card,
+// see docs/open-questions.md).
 global OID_DATE_OF_BIRTH: [u8; 10] = [0x2a, 0x83, 0x08, 0x8c, 0x9b, 0x55, 0x08, 0x05, 0x05, 0x04];
 
 global TAG_BOOLEAN: u8 = 0x01;
@@ -38,7 +38,6 @@ global TAG_INTEGER: u8 = 0x02;
 global TAG_OCTET_STRING: u8 = 0x04;
 global TAG_OID: u8 = 0x06;
 global TAG_UTF8_STRING: u8 = 0x0c;
-global TAG_PRINTABLE_STRING: u8 = 0x13;
 global TAG_SEQUENCE: u8 = 0x30;
 global TAG_CONTEXT_0: u8 = 0xa0;
 global TAG_CONTEXT_3: u8 = 0xa3;
@@ -139,17 +138,19 @@ pub fn parse_tbs(tbs: [u8; MAX_TBS_LEN], tbs_len: u32) -> CertFields {
                     let wrap = child(tbs, oid.end, name.end, TAG_CONTEXT_0);
                     assert(wrap.end == name.end, "date of birth: trailing bytes");
                     let s = read_tlv(tbs, wrap.start, wrap.end);
-                    assert(
-                        (s.tag == TAG_UTF8_STRING) | (s.tag == TAG_PRINTABLE_STRING),
-                        "date of birth: unexpected string type",
-                    );
+                    assert(s.tag == TAG_UTF8_STRING, "date of birth: unexpected string type");
                     assert(s.end == wrap.end, "date of birth: trailing bytes");
-                    assert(s.len == 8, "date of birth: expected YYYYMMDD");
+                    // The value is nine digits: a Japanese era code (1 Meiji .. 5 Reiwa)
+                    // followed by the Gregorian date YYYYMMDD. The era digit carries no
+                    // extra information, so it is only required to be a digit.
+                    assert(s.len == 9, "date of birth: expected era digit + YYYYMMDD");
                     let mut v: u32 = 0;
-                    for i in 0..8 {
+                    for i in 0..9 {
                         let c = tbs[s.start + i];
                         assert((c >= 0x30) & (c <= 0x39), "date of birth: not a digit");
-                        v = v * 10 + (c - 0x30) as u32;
+                        if i != 0 {
+                            v = v * 10 + (c - 0x30) as u32;
+                        }
                     }
                     date_of_birth = v;
                     dob_found = true;

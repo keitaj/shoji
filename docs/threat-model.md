@@ -74,5 +74,6 @@ check that stops them.
 - If the proving software on the device is tampered with, leakage of personal
   data cannot be prevented (to be addressed by open source and reproducible
   builds).
-- If the mock certificate structure differs from a real card's, the circuit
-  rejects real cards; it does not wrongly accept them.
+- The certificate structure was checked against a single real card. A card whose
+  structure differs (for example a TBSCertificate longer than the buffer) is
+  rejected by the circuit; it is not wrongly accepted.

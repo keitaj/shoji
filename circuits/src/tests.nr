@@ -182,6 +182,30 @@ fn fail_parser_non_digit_date() {
     let _ = parse_tbs(c.tbs, c.tbs_len);
 }
 
+// The leading era digit is not part of the date: changing it leaves the parsed date
+// unchanged (and, like any change to the TBS, breaks the CA signature).
+#[test]
+fn era_digit_is_not_part_of_the_date() {
+    let mut c = ADULT;
+    assert_eq(c.tbs[c.dob_offset - 1], 0x34); // Heisei
+    c.tbs[c.dob_offset - 1] = 0x33;
+    assert_eq(parse_tbs(c.tbs, c.tbs_len).date_of_birth, 19900115);
+}
+
+#[test(should_fail_with = "date of birth: not a digit")]
+fn fail_parser_non_digit_era() {
+    let mut c = ADULT;
+    c.tbs[c.dob_offset - 1] = 0x41;
+    let _ = parse_tbs(c.tbs, c.tbs_len);
+}
+
+#[test(should_fail)]
+fn fail_tampered_era_digit() {
+    let mut c = ADULT;
+    c.tbs[c.dob_offset - 1] = 0x33;
+    let _ = prove_default(c);
+}
+
 #[test(should_fail)]
 fn fail_parser_length_does_not_match_tbs_len() {
     let _ = parse_tbs(ADULT.tbs, ADULT.tbs_len + 1);
