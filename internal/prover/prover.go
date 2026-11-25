@@ -10,8 +10,6 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-
-	"github.com/keitaj/shoji/internal/witness"
 )
 
 // VerifierTarget selects bb's transcript hash and zero-knowledge setting. Prover
@@ -45,6 +43,19 @@ func DefaultTools(repoRoot string) Tools {
 	}
 }
 
+// DelegatedTools is DefaultTools for the delegated circuit
+// (circuits/delegated), which proves without the card.
+func DelegatedTools(repoRoot string) Tools {
+	t := DefaultTools(repoRoot)
+	t.Artifact = filepath.Join(repoRoot, "circuits", "target", "shoji_delegated.json")
+	t.VK = filepath.Join(repoRoot, "circuits", "target", "vk_delegated", "vk")
+	return t
+}
+
+// Inputs are the inputs of one of the circuits (*witness.Inputs or
+// *witness.DelegatedInputs), rendered as a Prover.toml.
+type Inputs interface{ ProverTOML() string }
+
 // Proof is what the holder sends to the verifier, plus the public inputs bb
 // wrote (used by tests; the verifier rebuilds them itself).
 type Proof struct {
@@ -57,7 +68,7 @@ var ErrUnsatisfied = errors.New("inputs do not satisfy the circuit")
 
 // Prove generates a proof. The witness lives only in a private temporary
 // directory that is removed before returning.
-func Prove(ctx context.Context, t Tools, in *witness.Inputs) (*Proof, error) {
+func Prove(ctx context.Context, t Tools, in Inputs) (*Proof, error) {
 	dir, err := os.MkdirTemp("", "shoji-prove-")
 	if err != nil {
 		return nil, err

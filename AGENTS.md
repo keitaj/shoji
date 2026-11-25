@@ -41,7 +41,7 @@ make bench     # measure proving time and memory (record results in docs/bench.m
 gofmt -l . && go vet ./...
 ```
 
-Run `make fixtures` before using `nargo` directly (`circuits/src/fixtures.nr` is generated and not in git).
+Run `make fixtures` before using `nargo` directly (`circuits/*/src/fixtures.nr` are generated and not in git).
 
 ## What the circuit must prove (security invariants, most important)
 
@@ -61,24 +61,33 @@ Public outputs: `nullifier`, `is_over_threshold`
    the same application always gets the same value; in a different application, an unrelated value.
    Never let the inputs of the nullifier be freely chosen by the witness (non-determinism).
 
+The delegated circuit (`circuits/delegated`) proves 1, 3 and 4 unchanged and replaces 2: the holder's key
+signed a commitment to a secret and an expiry, the prover knows the secret, and
+`current_date <= expiry <= latest_expiry` (an extra public input, today + 30 days). It must give the same
+nullifier as the card-present circuit. The secret is only ever generated on the holder's device.
+
 Under-constrained circuits are the most common vulnerability in ZK. For every constraint, confirm with a
 negative test that a proof cannot be produced when the value is falsified.
 
 ## Repository layout
 
 ```
-circuits/           Noir circuit (src/main.nr, cert.nr, der.nr, tests.nr)
+circuits/           Noir workspace: card/ (card present; src/main.nr, tests.nr), delegated/ (no card present),
+                    core/ (shared: cert.nr, der.nr, keys.nr)
 cmd/mockca/         test CA and tool that issues certificates shaped like JPKI signing certificates
-cmd/genfixtures/    generates testdata/ and the circuit test fixtures (circuits/src/fixtures.nr)
+cmd/genfixtures/    generates testdata/ and the circuit test fixtures (circuits/*/src/fixtures.nr)
 cmd/certinspect/    prints a certificate's structure without its contents; checks it against the circuit
 cmd/sodinspect/     reports how an electronic passport is signed, without its contents (see docs/passport.md)
 cmd/verifier/       verification server (nonce issuance, proof verification, nullifier storage, `ban` subcommand)
 cmd/mockclient/     stand-in for the holder (signs with a mock key instead of a card)
+cmd/wallet/         stand-in for the holder's phone in the delegated flow (signs a delegation, then proves without a key)
 cmd/cardclient/     holder for a real card (gets a challenge, then proves with the card's signature)
 internal/proto/     values the circuit and Go must agree on (message format, hashes, field encoding)
 internal/           the other Go packages (mockjpki, witness, prover, verifier, client)
 testdata/           mock certificates and keys (generated, not in git; never put real personal data here)
 docs/               threat model, open questions, benchmarks (English is authoritative; Japanese in docs/ja/)
+examples/shop/      made-up shop that embeds the verifier from outside (one purchase and one review per person)
+examples/agent/     software shopping for one person at that shop, through the wallet
 prover/             Rust library that generates proofs in-process, for phones
 ios/                iOS app (verification from a QR code, proving on the device) and developer tools
 ```
@@ -93,7 +102,7 @@ ios/                iOS app (verification from a QR code, proving on the device)
    there is no hand-rolled cryptography. The circuit determines the positions of the public key and the
    date of birth by walking the DER of the TBS from the root.
 4. Negative tests: a certificate signed by another CA, a nonce mismatch, a tampered date of birth, a
-   substituted nullifier input and others are confirmed not to prove (`circuits/src/tests.nr`,
+   substituted nullifier input and others are confirmed not to prove (`circuits/card/src/tests.nr`,
    `internal/verifier/server_test.go`; the mapping to attacks is in docs/threat-model.md).
 5. `cmd/verifier`: `POST /challenge` (nonce issuance, short-lived and single-use) and `POST /verify`
    (proof verification, CA key hash check, nonce consumption, nullifier duplicate check). Storage is
@@ -119,6 +128,8 @@ card's certificate.
 - The phone, not the server, decides which application a proof is for: `app_id` is derived from the origin
   the phone talks to (`VerificationLink.appID`, same value as `proto.AppID(origin)`). Do not add a path
   where the server chooses `app_id`, the date or the CA hash without the phone checking it.
+- A delegation's secret stands in for the card. Never add a path where a server, an agent or anything
+  but the holder's own device supplies the secret or the bytes the card signs for a delegation.
 - The rules for external contributors are in CONTRIBUTING.md.
 
 ## Not implemented yet (notes)
@@ -127,8 +138,12 @@ card's certificate.
   card sign the nonce. Confirm APDUs and the file layout from existing open-source implementations and
   official documentation before implementing (do not write them from guesses).
 - The whole user flow has run with one real card on a local network: scan the service's QR code, tap the
-  card, proof generated on the phone and accepted. What remains is deployment (TLS, a public origin,
-  app distribution) and a defined way for a separate service to embed it.
+  card, proof generated on the phone and accepted. `examples/shop` embeds it as a separate service would,
+  using only `POST /sessions` and `GET /sessions/<id>`. What remains is deployment (TLS, a public origin,
+  app distribution) and a stable interface for embedding services.
+- Delegation on the phone: the iOS app does not create or store delegations, `prover/` handles only the
+  card-present circuit, and a real card has not signed a delegation message yet. The wallet's rules for
+  answering agents are not designed (docs/open-questions.md).
 - On-device proving on other phones: measured only on an iPhone 15 Pro (about 1.8 s, 506 MiB). Low-memory
   phones and Android are untested (time and memory decide whether this is viable as a business).
 - Revocation checking falls under the accreditation scheme for public personal authentication and is
@@ -141,4 +156,4 @@ card's certificate.
 - Do not settle unconfirmed specifications (OIDs, APDUs, certificate field positions) by guessing;
   record them in docs/open-questions.md.
 - Pin the versions of dependencies.
-- Do not commit the mock CA's keys and certificates (testdata/) or `circuits/src/fixtures.nr`.
+- Do not commit the mock CA's keys and certificates (testdata/) or `circuits/*/src/fixtures.nr`.

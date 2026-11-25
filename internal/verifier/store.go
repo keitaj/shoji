@@ -50,10 +50,16 @@ func OpenStore(path string) (*Store, error) {
 		db.Close()
 		return nil, err
 	}
-	// Databases created before sessions existed lack this column.
-	if _, err := db.Exec(`ALTER TABLE challenges ADD COLUMN session BLOB`); err != nil && !strings.Contains(err.Error(), "duplicate column") {
-		db.Close()
-		return nil, err
+	// Databases created before sessions or delegated proofs existed lack these columns.
+	for _, stmt := range []string{
+		`ALTER TABLE challenges ADD COLUMN session BLOB`,
+		`ALTER TABLE challenges ADD COLUMN delegated INTEGER NOT NULL DEFAULT 0`,
+		`ALTER TABLE sessions ADD COLUMN delegated INTEGER NOT NULL DEFAULT 0`,
+	} {
+		if _, err := db.Exec(stmt); err != nil && !strings.Contains(err.Error(), "duplicate column") {
+			db.Close()
+			return nil, err
+		}
 	}
 	return &Store{db: db}, nil
 }
@@ -70,6 +76,10 @@ type Challenge struct {
 	ExpiresAt    int64 // unix seconds
 	// Session is the verification session this challenge belongs to, if any.
 	Session []byte
+	// Delegated says which circuit the proof must be for: the delegated one
+	// (no card present) instead of the card-present one. It is fixed when the
+	// challenge is issued, never by the request that carries the proof.
+	Delegated bool
 }
 
 // PutChallenge stores a new challenge and drops expired ones.
@@ -78,8 +88,8 @@ func (s *Store) PutChallenge(ctx context.Context, c Challenge, now int64) error 
 		return err
 	}
 	_, err := s.db.ExecContext(ctx,
-		`INSERT INTO challenges (nonce, app, date_int, age_threshold, expires_at, session) VALUES (?, ?, ?, ?, ?, ?)`,
-		c.Nonce, c.App, c.CurrentDate, c.AgeThreshold, c.ExpiresAt, c.Session)
+		`INSERT INTO challenges (nonce, app, date_int, age_threshold, expires_at, session, delegated) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+		c.Nonce, c.App, c.CurrentDate, c.AgeThreshold, c.ExpiresAt, c.Session, c.Delegated)
 	return err
 }
 
@@ -91,8 +101,8 @@ var ErrNoChallenge = errors.New("unknown, used or expired nonce")
 func (s *Store) ConsumeChallenge(ctx context.Context, nonce []byte, now int64) (Challenge, error) {
 	c := Challenge{Nonce: nonce}
 	err := s.db.QueryRowContext(ctx,
-		`DELETE FROM challenges WHERE nonce = ? RETURNING app, date_int, age_threshold, expires_at, session`, nonce).
-		Scan(&c.App, &c.CurrentDate, &c.AgeThreshold, &c.ExpiresAt, &c.Session)
+		`DELETE FROM challenges WHERE nonce = ? RETURNING app, date_int, age_threshold, expires_at, session, delegated`, nonce).
+		Scan(&c.App, &c.CurrentDate, &c.AgeThreshold, &c.ExpiresAt, &c.Session, &c.Delegated)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Challenge{}, ErrNoChallenge
 	}
@@ -144,6 +154,9 @@ type Session struct {
 	Status    SessionStatus
 	Nullifier []byte // set when verified
 	IsNew     bool
+	// Delegated is set when the accepted proof was a delegated one: software
+	// holding the holder's delegation answered, not the card itself.
+	Delegated bool
 	ExpiresAt int64
 }
 
@@ -163,8 +176,8 @@ func (s *Store) PutSession(ctx context.Context, id []byte, expiresAt, now int64)
 func (s *Store) GetSession(ctx context.Context, id []byte, now int64) (Session, error) {
 	sess := Session{ID: id}
 	err := s.db.QueryRowContext(ctx,
-		`SELECT status, nullifier, is_new, expires_at FROM sessions WHERE id = ? AND expires_at >= ?`, id, now).
-		Scan(&sess.Status, &sess.Nullifier, &sess.IsNew, &sess.ExpiresAt)
+		`SELECT status, nullifier, is_new, delegated, expires_at FROM sessions WHERE id = ? AND expires_at >= ?`, id, now).
+		Scan(&sess.Status, &sess.Nullifier, &sess.IsNew, &sess.Delegated, &sess.ExpiresAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Session{}, ErrNoSession
 	}
@@ -173,9 +186,9 @@ func (s *Store) GetSession(ctx context.Context, id []byte, now int64) (Session, 
 
 // FinishSession records the outcome of a pending session. A session that already
 // has an outcome is left unchanged, so a session can be used for one verification only.
-func (s *Store) FinishSession(ctx context.Context, id []byte, status SessionStatus, nullifier []byte, isNew bool) error {
+func (s *Store) FinishSession(ctx context.Context, id []byte, status SessionStatus, nullifier []byte, isNew, delegated bool) error {
 	_, err := s.db.ExecContext(ctx,
-		`UPDATE sessions SET status = ?, nullifier = ?, is_new = ? WHERE id = ? AND status = ?`,
-		status, nullifier, isNew, id, SessionPending)
+		`UPDATE sessions SET status = ?, nullifier = ?, is_new = ?, delegated = ? WHERE id = ? AND status = ?`,
+		status, nullifier, isNew, delegated, id, SessionPending)
 	return err
 }

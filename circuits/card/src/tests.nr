@@ -4,7 +4,7 @@
 // thing changed, so a failure can only be caused by that change.
 // Fixtures come from `go run ./cmd/genfixtures` (synthetic data only).
 
-use crate::cert::parse_tbs;
+use shoji_core::cert::parse_tbs;
 use crate::fixtures::{
     ADULT, ADULT2, APP_ID, APP_ID_2, CA, CA_OTHER, CaFixture, CertFixture, DECOY, MINOR, NONCE,
     NONCE_2, OTHER_CA_ADULT,

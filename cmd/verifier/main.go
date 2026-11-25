@@ -32,6 +32,7 @@ func main() {
 	db := flag.String("db", "shoji.db", "SQLite database path")
 	bb := flag.String("bb", def.BB, "path to bb")
 	vk := flag.String("vk", def.VK, "path to the circuit verification key")
+	delegatedVK := flag.String("delegated-vk", "", "verification key of the delegated circuit (circuits/target/vk_delegated/vk); setting it accepts proofs made without the card, from a holder's delegation")
 	cas := flag.String("trusted-ca", "", "comma-separated certificates (PEM or DER) of trusted CAs (required)")
 	apps := flag.String("apps", "demo", "comma-separated application identifiers")
 	age := flag.Uint("age", 18, "age threshold")
@@ -72,21 +73,32 @@ func main() {
 		level = slog.LevelDebug
 	}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: level}))
+	var delegated verifier.ProofChecker
+	if *delegatedVK != "" {
+		if _, err := os.Stat(*delegatedVK); err != nil {
+			log.Fatalf("delegated verification key not found at %s (run `make circuit`)", *delegatedVK)
+		}
+		delegated = verifier.BBChecker{BB: *bb, VK: *delegatedVK}
+	}
 	srv, err := verifier.NewServer(verifier.Config{
-		Store:           store,
-		Checker:         verifier.BBChecker{BB: *bb, VK: *vk},
-		TrustedCAHashes: hashes,
-		Apps:            strings.Split(*apps, ","),
-		PublicOrigin:    *origin,
-		AgeThreshold:    uint8(*age),
-		NonceTTL:        *ttl,
-		Log:             logger,
+		Store:            store,
+		Checker:          verifier.BBChecker{BB: *bb, VK: *vk},
+		DelegatedChecker: delegated,
+		TrustedCAHashes:  hashes,
+		Apps:             strings.Split(*apps, ","),
+		PublicOrigin:     *origin,
+		AgeThreshold:     uint8(*age),
+		NonceTTL:         *ttl,
+		Log:              logger,
 	})
 	if err != nil {
 		log.Fatal(err)
 	}
 	logger.Info("listening", "addr", *listen, "trusted_cas", len(hashes))
-	hs := &http.Server{Addr: *listen, Handler: srv, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second}
+	hs := &http.Server{Addr: *listen, Handler: srv, ReadHeaderTimeout: 10 * time.Second, ReadTimeout: 30 * time.Second,
+		// Without this an idle connection is closed after ReadTimeout, which is
+		// about how long a holder takes between the challenge and the proof.
+		IdleTimeout: *ttl + time.Minute}
 	log.Fatal(hs.ListenAndServe())
 }
 

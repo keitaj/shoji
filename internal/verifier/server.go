@@ -74,6 +74,9 @@ func (c BBChecker) Check(ctx context.Context, proof, publicInputs []byte) (bool,
 type Config struct {
 	Store   *Store
 	Checker ProofChecker
+	// DelegatedChecker verifies proofs of the delegated circuit
+	// (circuits/delegated). Nil means delegated proofs are not accepted.
+	DelegatedChecker ProofChecker
 	// TrustedCAHashes are proto.PubkeyHash values of the CA keys the server
 	// trusts, as canonical hex (proto.FieldHex).
 	TrustedCAHashes []string
@@ -191,6 +194,9 @@ type challengeRequest struct {
 	// Session ties the challenge to a verification session (hex). The app must
 	// then be the server's public origin; it may be omitted.
 	Session string `json:"session,omitempty"`
+	// Delegated asks for a challenge to be answered with a delegated proof (no
+	// card present). The choice is stored with the challenge.
+	Delegated bool `json:"delegated,omitempty"`
 }
 
 // ChallengeResponse carries everything the holder needs to build the proof.
@@ -200,6 +206,10 @@ type ChallengeResponse struct {
 	CurrentDate  uint32 `json:"current_date"`
 	AgeThreshold uint8  `json:"age_threshold"`
 	ExpiresIn    int    `json:"expires_in"` // seconds
+	// LatestExpiry is set for a delegated challenge: the public input of the
+	// same name, proto.LatestExpiry(CurrentDate). The holder's software
+	// recomputes it and refuses any other value.
+	LatestExpiry uint32 `json:"latest_expiry,omitempty"`
 	// TrustedCAHashes lists the ca_pubkey_hash values the server accepts, so a
 	// holder that cannot compute the hash itself can pick the one for its CA.
 	// It is public configuration; the server still checks the value it gets back.
@@ -233,6 +243,10 @@ func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "unknown app")
 		return
 	}
+	if req.Delegated && s.cfg.DelegatedChecker == nil {
+		writeError(w, http.StatusBadRequest, "delegated proofs are not accepted")
+		return
+	}
 	nonce := make([]byte, proto.NonceBytes)
 	if _, err := rand.Read(nonce); err != nil {
 		writeError(w, http.StatusInternalServerError, "internal error")
@@ -245,6 +259,15 @@ func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 		AgeThreshold: s.cfg.AgeThreshold,
 		ExpiresAt:    now.Add(s.cfg.NonceTTL).Unix(),
 		Session:      session,
+		Delegated:    req.Delegated,
+	}
+	var latestExpiry uint32
+	if c.Delegated {
+		var err error
+		if latestExpiry, err = proto.LatestExpiry(c.CurrentDate); err != nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
 	}
 	if err := s.cfg.Store.PutChallenge(r.Context(), c, now.Unix()); err != nil {
 		s.cfg.Log.Error("store challenge", "err", err)
@@ -257,6 +280,7 @@ func (s *Server) handleChallenge(w http.ResponseWriter, r *http.Request) {
 		CurrentDate:     c.CurrentDate,
 		AgeThreshold:    c.AgeThreshold,
 		ExpiresIn:       int(s.cfg.NonceTTL / time.Second),
+		LatestExpiry:    latestExpiry,
 		TrustedCAHashes: s.trustedList,
 	})
 }
@@ -274,6 +298,8 @@ type VerifyResponse struct {
 	Nullifier string `json:"nullifier"`
 	// New is true the first time this nullifier is seen for the app.
 	New bool `json:"new"`
+	// Delegated is true when the proof was a delegated one.
+	Delegated bool `json:"delegated,omitempty"`
 }
 
 func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
@@ -315,7 +341,7 @@ func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 			if accepted {
 				status = SessionVerified
 			}
-			if err := s.cfg.Store.FinishSession(context.WithoutCancel(r.Context()), ch.Session, status, acceptedNullifier, acceptedNew); err != nil {
+			if err := s.cfg.Store.FinishSession(context.WithoutCancel(r.Context()), ch.Session, status, acceptedNullifier, acceptedNew, accepted && ch.Delegated); err != nil {
 				s.cfg.Log.Error("finish session", "err", err)
 			}
 		}()
@@ -329,16 +355,26 @@ func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Public inputs in circuit order. Only `nullifier` comes from the client,
-	// and the proof binds it. is_over_threshold is fixed to 1.
+	// and the proof binds it. is_over_threshold is fixed to 1. Which circuit the
+	// proof must be for was fixed when the challenge was issued.
 	fields := []*big.Int{
 		caHash,
 		nonce,
 		proto.AppID(ch.App),
 		big.NewInt(int64(ch.CurrentDate)),
 		big.NewInt(int64(ch.AgeThreshold)),
-		nullifier,
-		big.NewInt(1),
 	}
+	checker := s.cfg.Checker
+	if ch.Delegated {
+		latestExpiry, err := proto.LatestExpiry(ch.CurrentDate)
+		if err != nil || s.cfg.DelegatedChecker == nil {
+			writeError(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		fields = append(fields, big.NewInt(int64(latestExpiry)))
+		checker = s.cfg.DelegatedChecker
+	}
+	fields = append(fields, nullifier, big.NewInt(1))
 	public := make([]byte, 0, len(fields)*32)
 	for _, f := range fields {
 		b := proto.FieldBytes(f)
@@ -354,7 +390,7 @@ func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "busy")
 		return
 	}
-	ok, err := s.cfg.Checker.Check(ctx, proof, public)
+	ok, err := checker.Check(ctx, proof, public)
 	if err != nil {
 		s.cfg.Log.Error("proof check", "err", err)
 		writeError(w, http.StatusInternalServerError, "internal error")
@@ -379,8 +415,8 @@ func (s *Server) handleVerify(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	accepted, acceptedNullifier, acceptedNew = true, nb[:], isNew
-	s.cfg.Log.Info("verify accepted", "app", ch.App, "new", isNew)
-	writeJSON(w, http.StatusOK, VerifyResponse{OK: true, Nullifier: "0x" + hex.EncodeToString(nb[:]), New: isNew})
+	s.cfg.Log.Info("verify accepted", "app", ch.App, "new", isNew, "delegated", ch.Delegated)
+	writeJSON(w, http.StatusOK, VerifyResponse{OK: true, Nullifier: "0x" + hex.EncodeToString(nb[:]), New: isNew, Delegated: ch.Delegated})
 }
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, v any) bool {

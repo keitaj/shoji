@@ -17,7 +17,7 @@ import (
 	"github.com/keitaj/shoji/internal/proto"
 )
 
-// Inputs mirrors the parameters of main() in circuits/src/main.nr.
+// Inputs mirrors the parameters of main() in circuits/card/src/main.nr.
 type Inputs struct {
 	// Public inputs.
 	CAPubkeyHash *big.Int
@@ -158,5 +158,76 @@ func (in *Inputs) ProverTOML() string {
 	fmt.Fprintf(&sb, "cert_sig = %s\n", ByteList(in.CertSig))
 	fmt.Fprintf(&sb, "user_redc = %s\n", LimbList(proto.RedcParam(in.UserModulus), true))
 	fmt.Fprintf(&sb, "nonce_sig = %s\n", ByteList(in.NonceSig))
+	return sb.String()
+}
+
+// Delegation is what the holder's device keeps after the card has signed a
+// delegation: the secret, the day it expires and the card's signature. Together
+// with the certificate it lets the device prove without the card until Expiry.
+// All of it is private witness data.
+type Delegation struct {
+	Secret *big.Int
+	Expiry uint32 // YYYYMMDD, inclusive
+	Sig    []byte
+}
+
+// SignDelegation stands in for the card: a SHA-256 / PKCS#1 v1.5 signature over
+// proto.DelegationMessage made with the holder's private key.
+func SignDelegation(key *rsa.PrivateKey, secret *big.Int, expiry uint32) (*Delegation, error) {
+	c, err := proto.DelegationCommitment(secret)
+	if err != nil {
+		return nil, err
+	}
+	digest := sha256.Sum256(proto.DelegationMessage(c, expiry))
+	sig, err := rsa.SignPKCS1v15(nil, key, crypto.SHA256, digest[:])
+	if err != nil {
+		return nil, err
+	}
+	return &Delegation{Secret: secret, Expiry: expiry, Sig: sig}, nil
+}
+
+// DelegatedInputs mirrors the parameters of main() in
+// circuits/delegated/src/main.nr.
+type DelegatedInputs struct {
+	Inputs              // NonceSig is unused
+	LatestExpiry uint32 // public
+	Delegation   Delegation
+}
+
+// NewDelegated builds the inputs of the delegated circuit.
+func NewDelegated(cert *x509.Certificate, caPub *rsa.PublicKey, d *Delegation, appID, nonce *big.Int, currentDate uint32, ageThreshold uint8, latestExpiry uint32) (*DelegatedInputs, error) {
+	if d == nil || len(d.Sig) != proto.ModulusBytes {
+		return nil, errors.New("delegation signature must be 256 bytes")
+	}
+	if err := proto.CheckField(d.Secret); err != nil {
+		return nil, err
+	}
+	// New only checks the length of the signature it is given.
+	in, err := New(cert, caPub, d.Sig, appID, nonce, currentDate, ageThreshold)
+	if err != nil {
+		return nil, err
+	}
+	in.NonceSig = nil
+	return &DelegatedInputs{Inputs: *in, LatestExpiry: latestExpiry, Delegation: *d}, nil
+}
+
+// ProverTOML renders the inputs in nargo's Prover.toml format.
+func (in *DelegatedInputs) ProverTOML() string {
+	var sb strings.Builder
+	fmt.Fprintf(&sb, "ca_pubkey_hash = %q\n", proto.FieldHex(in.CAPubkeyHash))
+	fmt.Fprintf(&sb, "nonce = %q\n", proto.FieldHex(in.Nonce))
+	fmt.Fprintf(&sb, "app_id = %q\n", proto.FieldHex(in.AppID))
+	fmt.Fprintf(&sb, "current_date = %d\n", in.CurrentDate)
+	fmt.Fprintf(&sb, "age_threshold = %d\n", in.AgeThreshold)
+	fmt.Fprintf(&sb, "latest_expiry = %d\n", in.LatestExpiry)
+	fmt.Fprintf(&sb, "tbs = %s\n", ByteList(in.PaddedTBS()))
+	fmt.Fprintf(&sb, "tbs_len = %d\n", len(in.TBS))
+	fmt.Fprintf(&sb, "ca_modulus = %s\n", ByteList(ModulusBytes(in.CAModulus)))
+	fmt.Fprintf(&sb, "ca_redc = %s\n", LimbList(proto.RedcParam(in.CAModulus), true))
+	fmt.Fprintf(&sb, "cert_sig = %s\n", ByteList(in.CertSig))
+	fmt.Fprintf(&sb, "user_redc = %s\n", LimbList(proto.RedcParam(in.UserModulus), true))
+	fmt.Fprintf(&sb, "delegation_sig = %s\n", ByteList(in.Delegation.Sig))
+	fmt.Fprintf(&sb, "delegation_secret = %q\n", proto.FieldHex(in.Delegation.Secret))
+	fmt.Fprintf(&sb, "delegation_expiry = %d\n", in.Delegation.Expiry)
 	return sb.String()
 }

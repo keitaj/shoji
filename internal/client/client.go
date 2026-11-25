@@ -28,6 +28,8 @@ type Holder struct {
 	Key   *rsa.PrivateKey // mock card; nil when a real card produced the signature
 	CAPub *rsa.PublicKey  // issuer of Cert
 	Tools prover.Tools
+	// DelegatedTools locates the delegated circuit, for ProveDelegated.
+	DelegatedTools prover.Tools
 }
 
 func post(ctx context.Context, hc *http.Client, url string, in, out any) (int, error) {
@@ -77,6 +79,48 @@ func ChallengeForSession(ctx context.Context, hc *http.Client, base, origin, ses
 		return nil, err
 	}
 	return &ch, nil
+}
+
+// ChallengeDelegated requests a nonce to be answered with a delegated proof.
+// session may be empty.
+func ChallengeDelegated(ctx context.Context, hc *http.Client, base, app, session string) (*verifier.ChallengeResponse, error) {
+	var ch verifier.ChallengeResponse
+	if _, err := post(ctx, hc, base+"/challenge", map[string]any{"app": app, "session": session, "delegated": true}, &ch); err != nil {
+		return nil, err
+	}
+	return &ch, nil
+}
+
+// ProveDelegated builds the request for /verify without the card, from a
+// delegation the card signed earlier. Only the proof and public values leave
+// this function; the delegation and its secret do not.
+func (h *Holder) ProveDelegated(ctx context.Context, ch *verifier.ChallengeResponse, d *witness.Delegation) (*verifier.VerifyRequest, error) {
+	nonce, err := proto.ParseFieldHex(ch.Nonce)
+	if err != nil {
+		return nil, err
+	}
+	appID, err := proto.ParseFieldHex(ch.AppID)
+	if err != nil {
+		return nil, err
+	}
+	in, err := witness.NewDelegated(h.Cert, h.CAPub, d, appID, nonce, ch.CurrentDate, ch.AgeThreshold, ch.LatestExpiry)
+	if err != nil {
+		return nil, err
+	}
+	p, err := prover.Prove(ctx, h.DelegatedTools, in)
+	if err != nil {
+		return nil, err
+	}
+	nullifier, err := proto.Nullifier(in.UserModulus, appID)
+	if err != nil {
+		return nil, err
+	}
+	return &verifier.VerifyRequest{
+		Nonce:        ch.Nonce,
+		CAPubkeyHash: proto.FieldHex(in.CAPubkeyHash),
+		Nullifier:    proto.FieldHex(nullifier),
+		Proof:        base64.StdEncoding.EncodeToString(p.Proof),
+	}, nil
 }
 
 // Prove signs the challenge with the (mock) card and builds the request for

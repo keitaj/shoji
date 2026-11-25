@@ -1,6 +1,7 @@
 // Command genfixtures creates the mock CAs and certificates under testdata/
-// (if they do not exist yet) and writes circuits/src/fixtures.nr, the inputs of
-// the circuit's positive and negative tests.
+// (if they do not exist yet) and writes the Noir fixtures, the inputs of the
+// circuits' positive and negative tests (the same file for both circuits:
+// circuits/card/src/fixtures.nr and circuits/delegated/src/fixtures.nr).
 //
 // All data is synthetic. Run from the repository root: go run ./cmd/genfixtures
 package main
@@ -31,7 +32,7 @@ type holderSpec struct {
 
 func main() {
 	dir := flag.String("testdata", "testdata", "directory holding mock keys and certificates")
-	out := flag.String("out", "circuits/src/fixtures.nr", "Noir fixture file to write")
+	out := flag.String("out", "circuits/card/src/fixtures.nr,circuits/delegated/src/fixtures.nr", "comma-separated Noir fixture files to write (all get the same content)")
 	proverTOML := flag.String("prover-toml", "", "also write circuit inputs for the adult fixture to this path (for benchmarks)")
 	inputsJSON := flag.String("inputs-json", "", "also write the same inputs as JSON to this path (for on-device benchmarks)")
 	cardFixture := flag.String("card-fixture", "", "also write to this directory what a phone would hold for the adult fixture (cert.der, ca.der, nonce_sig.bin, request.json) and the expected inputs.json")
@@ -86,13 +87,20 @@ func main() {
     // Expected nullifiers for APP_ID and APP_ID_2, computed independently in Go.
     pub nullifier: Field,
     pub nullifier_app2: Field,
+    // Card signature delegating to DELEGATION_SECRET until DELEGATION_EXPIRY.
+    pub delegation_sig: [u8; 256],
 }
 
 `)
 	fmt.Fprintf(&sb, "pub global APP_ID: Field = %s;\n", proto.FieldHex(appID))
 	fmt.Fprintf(&sb, "pub global APP_ID_2: Field = %s;\n", proto.FieldHex(appID2))
 	fmt.Fprintf(&sb, "pub global NONCE: Field = %s;\n", proto.FieldHex(nonce))
-	fmt.Fprintf(&sb, "pub global NONCE_2: Field = %s;\n\n", proto.FieldHex(nonce2))
+	fmt.Fprintf(&sb, "pub global NONCE_2: Field = %s;\n", proto.FieldHex(nonce2))
+	// A delegation made on the tests' "today" (2026-11-23) for the longest time allowed.
+	secret := new(big.Int).SetBytes(bytes.Repeat([]byte{0x33}, 31))
+	const delegationExpiry = 20261223
+	fmt.Fprintf(&sb, "pub global DELEGATION_SECRET: Field = %s;\n", proto.FieldHex(secret))
+	fmt.Fprintf(&sb, "pub global DELEGATION_EXPIRY: u32 = %d;\n\n", delegationExpiry)
 
 	for _, name := range []string{"ca", "ca_other"} {
 		n := cas[name].Key.PublicKey.N
@@ -139,13 +147,20 @@ func main() {
 		fmt.Fprintf(&sb, "    user_redc: %s,\n", witness.LimbList(proto.RedcParam(n), false))
 		fmt.Fprintf(&sb, "    modulus: %s,\n    modulus_offset: %d,\n    dob_offset: %d,\n", witness.ByteList(witness.ModulusBytes(n)), modOff, dobOff)
 		fmt.Fprintf(&sb, "    nonce_sig: %s,\n    nonce_sig_app2: %s,\n    nonce_sig_nonce2: %s,\n", sig(appID, nonce), sig(appID2, nonce), sig(appID, nonce2))
-		fmt.Fprintf(&sb, "    nullifier: %s,\n    nullifier_app2: %s,\n};\n\n", proto.FieldHex(null1), proto.FieldHex(null2))
+		fmt.Fprintf(&sb, "    nullifier: %s,\n    nullifier_app2: %s,\n", proto.FieldHex(null1), proto.FieldHex(null2))
+		d, err := witness.SignDelegation(key, secret, delegationExpiry)
+		if err != nil {
+			log.Fatal(err)
+		}
+		fmt.Fprintf(&sb, "    delegation_sig: %s,\n};\n\n", witness.ByteList(d.Sig))
 	}
 
-	if err := os.WriteFile(*out, []byte(sb.String()), 0o644); err != nil {
-		log.Fatal(err)
+	for _, path := range strings.Split(*out, ",") {
+		if err := os.WriteFile(path, []byte(sb.String()), 0o644); err != nil {
+			log.Fatal(err)
+		}
+		log.Printf("wrote %s", path)
 	}
-	log.Printf("wrote %s", *out)
 
 	if *proverTOML != "" || *inputsJSON != "" || *cardFixture != "" {
 		cert, key := loadOrIssue(*dir, specs[0], cas["ca"])

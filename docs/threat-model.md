@@ -50,6 +50,56 @@ Each negative test is a passing case with exactly one thing changed.
 the tampered certificates are still well-formed, i.e. that it is the signature
 check that stops them.
 
+## Delegated proofs (no card present)
+
+A second circuit (`circuits/delegated`) proves the same statement without the
+card. The card signs once, on the holder's device: a commitment to a secret the
+device chose, and the last day the delegation is valid (at most 30 days ahead).
+Until then, whoever knows the certificate, that signature and the secret can
+prove, for any service, with the same nullifier the card would give. This is
+meant for software acting for the holder, such as an AI agent: the agent hands a
+verification link to the holder's wallet and never sees any of the three.
+
+A verifier accepts delegated proofs only if it is configured to, and reports to
+the relying service whether a proof was delegated; the service decides what
+software may do (`examples/shop` takes agents' orders for one item only).
+
+What changes compared with the card being present:
+
+| Attack | Countermeasure | Tests |
+|---|---|---|
+| Prove with a copy of someone's certificate and one's own delegation | The delegation must be signed by the key in that certificate | `fail_delegation_signed_by_another_key`, `TestDelegationFromAnotherCard` |
+| Prove with a certificate and a delegation, without the secret | The signed commitment is Poseidon(secret), and the prover must know the secret | `fail_wrong_secret` |
+| Use a delegation after its last day, or claim a later one | The expiry is part of the signed message and is compared with `current_date` | `fail_expired`, `fail_claiming_a_later_expiry_than_signed`, `TestDelegationExpires` |
+| Have the card sign a delegation that never expires | `latest_expiry` is a public input the verifier sets to today + 30 days | `fail_longer_than_the_verifier_allows`, `TestDelegationLongerThanAllowed` |
+| Pass a signature made for the card-present circuit off as a delegation, or the reverse | The two signed messages have different prefixes and lengths | `fail_card_present_signature_is_not_a_delegation` |
+| Replay a delegated proof for another nonce or service | Both are public inputs of the proof | `TestDelegatedProofIsBoundToItsNonce`, `TestDelegatedProofIsBoundToItsApp` |
+| Answer a card-present challenge with a delegated proof | Which circuit a proof must be for is stored with the challenge | `TestProofMustMatchTheKindOfChallenge` |
+| One person runs many agents to get around a per-person limit, or to come back after a ban | Every agent of a person carries that person's nullifier, the same as their card's | `TestDelegatedProofIsTheSamePersonAsTheCard`, `TestDelegatedMinorAndBan`, `TestAgentsOfOnePersonGetOneItem` |
+
+What it costs, and is not defended against:
+
+- **The secret replaces the card.** Whoever copies the wallet's contents
+  (certificate, delegation signature, secret) is the holder at every service
+  that accepts delegated proofs, until the delegation expires. There is no
+  revocation; the only limit is the expiry. The card-present flow needs the card
+  and its PIN every time; this one needs them once.
+- **The device must choose the secret.** If software could get the card to sign
+  a delegation for a secret it knows, it would hold the person's identity for 30
+  days. The card cannot tell; the app that drives the card must only ever sign
+  delegations for secrets it generated itself, never anything a server sent. The
+  card-present message has a fixed format with its own prefix, so a server cannot
+  obtain a delegation through that flow.
+- **The wallet holds the certificate at rest**, which the card-present flow
+  avoids. On a phone this belongs in hardware-protected storage. So far only a
+  stand-in on a PC exists (`cmd/wallet`).
+- **The wallet decides for the holder.** The stand-in answers every link it is
+  given. Which agents may ask, for which services and how often, is the wallet's
+  job and is not designed yet. An agent that can reach the wallet can spend the
+  holder's "one per person" wherever it likes.
+- A service that sees both kinds of proof learns that the person uses a
+  delegation. It does not learn the expiry: only that it lies within 30 days.
+
 ## About the circuit's constraints
 
 - The only inputs the prover can choose freely, bound by neither a signature nor
@@ -62,6 +112,10 @@ check that stops them.
 - The public exponent is fixed to 65537. For the holder key, the whole
   SubjectPublicKeyInfo is compared against a fixed pattern, which forces
   RSA-2048 with e = 65537.
+- In the delegated circuit `nonce` enters no constraint; it is bound by being a
+  public input (`TestDelegatedProofIsBoundToItsNonce`). The additional free
+  inputs there are the delegation's secret and expiry, both fixed by the card's
+  signature.
 - We have not audited the dependencies ourselves, in particular how
   noir-bignum's unconstrained hints are tied to its constraints.
 

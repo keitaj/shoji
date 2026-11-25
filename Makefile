@@ -13,17 +13,18 @@ all: circuit test
 fixtures:
 	go run ./cmd/genfixtures
 
-# Compile the circuit and write its verification key.
-# (The circuit crate declares `mod fixtures` for its tests, so the file must exist.)
+# Compile both circuits (card present, delegated) and write their verification keys.
+# (The circuit crates declare `mod fixtures` for their tests, so the files must exist.)
 circuit: fixtures
-	cd circuits && $(NARGO) compile
-	mkdir -p circuits/target/vk
+	cd circuits && $(NARGO) compile --workspace
+	mkdir -p circuits/target/vk circuits/target/vk_delegated
 	$(BB) write_vk -b circuits/target/shoji.json -o circuits/target/vk -t $(TARGET)
+	$(BB) write_vk -b circuits/target/shoji_delegated.json -o circuits/target/vk_delegated -t $(TARGET)
 
 test: test-circuit test-go
 
 test-circuit: fixtures
-	cd circuits && $(NARGO) test
+	cd circuits && $(NARGO) test --workspace
 
 # Needs `make circuit` first; the tests that need bb skip otherwise.
 test-go: fixtures

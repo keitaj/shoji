@@ -87,6 +87,18 @@ so that only the proof and the nullifier left the phone.
   nullifier to a person. Mixing a deterministic card signature into the nullifier
   as a secret would prevent this at the cost of one more RSA verification in the
   circuit.
+- **Delegation: how the wallet decides.** With a delegation the holder's device
+  proves without the card ([threat model](threat-model.md)). What is not
+  designed: how an agent is allowed to ask the wallet (per service, per day, with
+  the holder's confirmation or without), whether a delegation should be limited
+  to named services, and how to revoke one before it expires. On a phone, where
+  the certificate and the secret are kept is also open, and whether a real card
+  signs the 52-byte delegation message like any other digest has not been tried.
+- **Delegation: how it fits agent protocols.** Agent payment and identity
+  protocols (AP2 mandates, KYA tokens, signed agent requests) say which agent
+  acts and what it may pay; none of those we looked at carries "one real person,
+  not known by name". Attaching a delegated proof to such a credential, and
+  binding it to the agent's key, is not designed.
 - **Validity period.** The circuit does not look at notBefore / notAfter.
 - **Revocation.** Falls under the accreditation scheme for public personal
   authentication; out of scope for the proof of concept.

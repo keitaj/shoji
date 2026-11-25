@@ -34,7 +34,7 @@ The server learns only a proof and these public values:
 |---|---|
 | `ca_pubkey_hash`, `nonce`, `app_id`, `current_date`, `age_threshold` | `nullifier`, `is_over_threshold` |
 
-The circuit ([`circuits/src`](circuits/src)) enforces:
+The circuit ([`circuits/card`](circuits/card/src/main.nr)) enforces:
 
 1. **Issued by the CA.** The RSA-2048 / SHA-256 signature over the
    TBSCertificate verifies under the CA key committed to by `ca_pubkey_hash`.
@@ -51,6 +51,23 @@ The positions of the public key and the date of birth are not supplied by the
 prover. The circuit walks the certificate's DER structure from the root, so
 bytes that merely look like a date of birth elsewhere in the certificate are
 never used.
+
+### Without the card: delegation, for software acting for a person
+
+A second circuit ([`circuits/delegated`](circuits/delegated/src/main.nr)) proves
+the same four things without the card being present. The card signs once: a
+commitment to a secret chosen on the holder's device, and an expiry at most 30
+days ahead. Until then the device can prove for any service, with the same
+nullifier the card gives.
+
+This is for AI agents and other software that acts for someone. A service that
+takes orders from agents cannot tell ten customers from one person running ten
+agents; here every agent of a person carries that person's nullifier for the
+service, and nothing else about them. The agent passes a link to the holder's
+wallet and never holds the certificate or the delegation. The costs (the secret
+stands in for the card until it expires, the wallet has to decide for the
+holder) are in the [threat model](docs/threat-model.md). A verifier accepts
+delegated proofs only when started with `-delegated-vk`.
 
 ## How it works
 
@@ -159,10 +176,21 @@ go run ./cmd/verifier -listen 0.0.0.0:8080 -public-origin http://<this machine's
     -trusted-ca <signing CA certificate>
 ```
 
+If the phone reports that it cannot connect (a timeout) while the same address
+answers from this machine, check the machine's firewall. On macOS the firewall
+allows incoming connections per program, and a rebuilt `verifier` binary counts
+as a new program that has to be allowed again.
+
+[`examples/shop`](examples/shop/README.md) is a made-up online shop that embeds
+this from the outside, as a separate service would: limited items, one per
+person, and one review per buyer, with nothing stored about anyone but the
+nullifier. It also takes orders from agents ([`examples/agent`](examples/agent/main.go)):
+ten agents of one person get one item.
+
 ### Mock data
 
 The mock CA, the mock certificates in `testdata/` and the derived Noir fixtures
-(`circuits/src/fixtures.nr`) are **not in the repository**. `make` generates
+(`circuits/*/src/fixtures.nr`) are **not in the repository**. `make` generates
 them on first use and reuses them afterwards. All of it is synthetic.
 
 The mock CA is for tests only: whoever holds its key can issue a certificate
@@ -170,20 +198,22 @@ with any date of birth. Never expose a verifier that trusts `testdata/ca.pem`.
 
 ## Performance
 
-About 222k gates and 14.7 KB proofs. Proving takes **~0.8 s** on an Apple M5
+About 222k gates and 14.7 KB proofs (the delegated circuit: 218k gates, not yet
+benchmarked separately). Proving takes **~0.8 s** on an Apple M5
 laptop (585 MiB peak) and **~1.8 s** on an iPhone 15 Pro (506 MiB peak);
 verifying takes ~10 ms. Details: [docs/bench.md](docs/bench.md).
 
 ## Repository layout
 
 ```
-circuits/           Noir circuit and its tests
+circuits/           Noir circuits and their tests: card/ (card present), delegated/ (no card), core/ (shared)
 cmd/mockca/         mock CA (init / issue / hash)
 cmd/genfixtures/    generates testdata/ and the circuit test fixtures
 cmd/certinspect/    prints a certificate's structure without its contents; checks it against the circuit
 cmd/sodinspect/     reports how an electronic passport is signed, without its contents
 cmd/verifier/       verification server (/challenge, /verify, `ban` subcommand)
 cmd/mockclient/     stand-in for the holder: signs with a mock key instead of a card
+cmd/wallet/         stand-in for the holder's phone in the delegated flow: signs a delegation, then answers links without a key
 cmd/cardclient/     holder for a real card: gets a challenge, then proves with the card's signature
 internal/proto/     values the circuit and Go must agree on (message format, hashes, field encoding)
 internal/mockjpki/  mock certificate issuance
@@ -193,6 +223,8 @@ internal/verifier/  server and SQLite store
 internal/client/    holder side of the protocol
 docs/               threat model, open questions, benchmarks
 prover/             Rust library that generates proofs in-process, for phones (official Noir and Barretenberg crates only)
+examples/shop/      a made-up shop that embeds the verifier: one purchase and one review per person
+examples/agent/     software that shops for one person, as many copies as you like
 ios/                iOS app: verification from a QR code with a real card, proving on the device; developer tools
 ```
 
@@ -209,19 +241,25 @@ documents are authoritative.
 ## Roadmap
 
 Working today: the circuit, a mock CA, the verification server, negative tests
-and PC benchmarks, verification sessions with a demo page, and an iOS app that
-goes from a scanned QR code to an accepted proof with a real card, proving on
-the device.
+and PC benchmarks, verification sessions with a demo page, an example service
+that embeds them (`examples/shop`), and an iOS app that goes from a scanned QR
+code to an accepted proof with a real card, proving on the device. Delegated
+proofs work end to end with mock certificates on a PC.
 
 Not implemented yet:
 
 - A deployed verifier (TLS, a public origin) and a distributed app. So far both
   ran only on a local network, from a development build.
-- A defined way for a separate service to embed this (the demo page lives on the
-  verifier itself), and protection against a session's QR code being shown to
-  someone else (see the threat model).
+- A stable interface for services that embed this (`examples/shop` uses the two
+  session requests as they are today; each service needs its own verifier
+  origin, since that origin is what the nullifier is specific to), and
+  protection against a session's QR code being shown to someone else (see the
+  threat model).
 - Computing the CA key hash on the phone (the verifier's list is relayed to it),
   which matters once more than one CA key is trusted.
+- Delegation on the phone and with a real card: the app does not create or
+  store delegations yet, and `prover/` knows only the card-present circuit. How a
+  wallet decides which agent may ask for what is not designed.
 - Android, and phones with less memory than the one tested.
 - Checking certificate expiry.
 

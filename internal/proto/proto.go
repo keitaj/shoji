@@ -2,7 +2,7 @@
 // the verifier must agree on byte-for-byte: field encodings, the message the
 // card signs, and the Poseidon hashes used for the CA key hash and nullifier.
 //
-// Anything changed here must be changed in circuits/src/main.nr as well; the
+// Anything changed here must be changed in the circuits (circuits/card, circuits/delegated) as well; the
 // fixture tests (cmd/genfixtures + `nargo test`) fail if the two drift apart.
 package proto
 
@@ -30,6 +30,17 @@ const (
 	NonceDomain = "shoji-v1-nonce::"
 	// NonceMessageLen = len(NonceDomain) + 32 (app_id) + 32 (nonce).
 	NonceMessageLen = 80
+	// DelegationDomain prefixes the message the card signs to delegate
+	// possession to a secret held by the holder's own device (see
+	// DelegationMessage). It differs from NonceDomain, so neither kind of
+	// signature can stand in for the other. Exactly 16 bytes.
+	DelegationDomain = "shoji-v1-deleg::"
+	// DelegationMessageLen = len(DelegationDomain) + 32 (commitment) + 4 (expiry).
+	DelegationMessageLen = 52
+	// MaxDelegationDays is the longest a delegation may run. A verifier passes
+	// current_date + MaxDelegationDays as latest_expiry, and the holder's
+	// software insists on exactly that value.
+	MaxDelegationDays = 30
 	// NonceBytes is the number of random bytes in a nonce. 31 bytes always
 	// fits in a BN254 field element.
 	NonceBytes = 31
@@ -98,6 +109,37 @@ func NonceMessage(appID, nonce *big.Int) []byte {
 	msg = append(msg, a[:]...)
 	msg = append(msg, n[:]...)
 	return msg
+}
+
+// DelegationCommitment = Poseidon(secret): what the card signs in place of the
+// secret itself. Knowing the secret then stands in for holding the card.
+func DelegationCommitment(secret *big.Int) (*big.Int, error) {
+	if err := CheckField(secret); err != nil {
+		return nil, err
+	}
+	return poseidon.Hash([]*big.Int{secret})
+}
+
+// DelegationMessage is the exact byte string the card signs (SHA-256, PKCS#1
+// v1.5) to delegate until the end of the day `expiry` (YYYYMMDD):
+// DelegationDomain || commitment (32 bytes BE) || expiry (4 bytes BE).
+func DelegationMessage(commitment *big.Int, expiry uint32) []byte {
+	c := FieldBytes(commitment)
+	msg := make([]byte, 0, DelegationMessageLen)
+	msg = append(msg, DelegationDomain...)
+	msg = append(msg, c[:]...)
+	msg = append(msg, byte(expiry>>24), byte(expiry>>16), byte(expiry>>8), byte(expiry))
+	return msg
+}
+
+// LatestExpiry is the latest expiry date a delegation may carry when it is
+// used on currentDate (both YYYYMMDD): MaxDelegationDays later.
+func LatestExpiry(currentDate uint32) (uint32, error) {
+	t, err := time.Parse("20060102", fmt.Sprintf("%08d", currentDate))
+	if err != nil {
+		return 0, fmt.Errorf("bad date %d", currentDate)
+	}
+	return DateInt(t.AddDate(0, 0, MaxDelegationDays)), nil
 }
 
 // ChallengePrefix starts the text form of a challenge handed to the device

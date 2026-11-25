@@ -166,8 +166,8 @@ struct VerifyView: View {
 
     private func describe(_ error: Error) -> String {
         switch error {
-        case VerifierClient.ClientError.unreachable:
-            return "サービスに接続できませんでした。通信環境を確認してください。"
+        case VerifierClient.ClientError.unreachable(let reason):
+            return "サービスに接続できませんでした。通信環境を確認してください。（\(reason)）"
         case VerifierClient.ClientError.rejected(_, let message):
             switch message {
             case "unknown session": return "この QR コードは期限切れか、すでに使われています。サービスの画面を更新してやり直してください。"

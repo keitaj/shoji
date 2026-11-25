@@ -62,6 +62,9 @@ type SessionResponse struct {
 	Status    string `json:"status"` // pending | verified | rejected
 	Nullifier string `json:"nullifier,omitempty"`
 	New       bool   `json:"new,omitempty"`
+	// Delegated is true when no card was present: software holding the holder's
+	// delegation (for instance on behalf of an AI agent) answered.
+	Delegated bool `json:"delegated,omitempty"`
 }
 
 func (s *Server) session(w http.ResponseWriter, r *http.Request) (Session, bool) {
@@ -91,7 +94,7 @@ func (s *Server) handleGetSession(w http.ResponseWriter, r *http.Request) {
 	res := SessionResponse{Status: "pending"}
 	switch sess.Status {
 	case SessionVerified:
-		res = SessionResponse{Status: "verified", Nullifier: "0x" + hex.EncodeToString(sess.Nullifier), New: sess.IsNew}
+		res = SessionResponse{Status: "verified", Nullifier: "0x" + hex.EncodeToString(sess.Nullifier), New: sess.IsNew, Delegated: sess.Delegated}
 	case SessionRejected:
 		res.Status = "rejected"
 	}

@@ -24,15 +24,21 @@ struct VerifierClient {
     enum ClientError: Error {
         /// The server answered with an error; `message` is its short reason.
         case rejected(status: Int, message: String)
-        case unreachable
+        /// No answer from the server. `reason` is the system's error domain and
+        /// code (for example "NSURLErrorDomain -1009"), never a URL or a body.
+        case unreachable(reason: String)
         case malformedResponse
     }
 
-    private static let session: URLSession = {
+    /// A session per request, so each request opens its own connection. Entering
+    /// the PIN, tapping the card and proving take long enough for the server to
+    /// close an idle connection; reusing it fails with "connection lost" (-1005),
+    /// and the proof must not be sent twice.
+    private static func makeSession() -> URLSession {
         let config = URLSessionConfiguration.ephemeral  // no cookies, no cache, nothing stored
         config.timeoutIntervalForRequest = 30
         return URLSession(configuration: config)
-    }()
+    }
 
     private func post<T: Decodable>(_ path: String, _ body: [String: String]) async throws -> T {
         guard let url = URL(string: link.origin + path) else { throw ClientError.malformedResponse }
@@ -42,10 +48,13 @@ struct VerifierClient {
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
         let data: Data
         let response: URLResponse
+        let session = Self.makeSession()
+        defer { session.finishTasksAndInvalidate() }
         do {
-            (data, response) = try await Self.session.data(for: request)
+            (data, response) = try await session.data(for: request)
         } catch {
-            throw ClientError.unreachable
+            let e = error as NSError
+            throw ClientError.unreachable(reason: "\(e.domain) \(e.code)")
         }
         guard let http = response as? HTTPURLResponse else { throw ClientError.malformedResponse }
         guard http.statusCode == 200 else {

@@ -15,7 +15,7 @@ import (
 	"github.com/keitaj/shoji/internal/proto"
 )
 
-// Limits mirrored from circuits/src/cert.nr.
+// Limits mirrored from circuits/core/src/cert.nr.
 const (
 	maxExtensions   = 12
 	maxGeneralNames = 10
